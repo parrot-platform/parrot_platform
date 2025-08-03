@@ -71,7 +71,8 @@ defmodule Parrot.MixProject do
   defp aliases do
     [
       test: ["test"],
-      "test.sipp": &run_sipp_tests/1
+      "test.sipp": &run_sipp_tests/1,
+      docs: ["docs", &copy_images/1]
     ]
   end
 
@@ -83,6 +84,19 @@ defmodule Parrot.MixProject do
 
       _path ->
         Mix.Task.run("test", ["test/sipp/test_scenarios.exs"])
+    end
+  end
+
+  defp copy_images(_) do
+    # Ensure doc directory exists
+    File.mkdir_p!("doc/assets")
+    
+    # Copy logo and any other assets from assets/ to doc/assets/
+    case File.cp_r("assets", "doc/assets") do
+      {:ok, _} ->
+        Mix.shell().info("Copied assets to doc/assets")
+      {:error, reason, file} ->
+        Mix.shell().error("Failed to copy #{file}: #{inspect(reason)}")
     end
   end
 
@@ -108,7 +122,7 @@ defmodule Parrot.MixProject do
       logo: "assets/logo.svg",
 
       # Assets to be copied to the docs
-      assets: "assets",
+      assets: %{"assets" => "assets"},
 
       # Extra pages to include in the documentation
       extras: [
