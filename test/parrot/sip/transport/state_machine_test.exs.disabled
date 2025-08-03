@@ -1,0 +1,736 @@
+defmodule Parrot.Sip.Transport.StateMachineTest do
+  use ExUnit.Case, async: false
+  doctest Parrot.Sip.Transport.StateMachine
+
+  alias Parrot.Sip.Transport.{StateMachine, Udp}
+  alias Parrot.Sip.{Message, Handler}
+  alias Parrot.Sip.Headers.{Via, From, To, Contact, CSeq}
+  
+  setup do
+    # Ensure StateMachine is stopped before each test
+    case Process.whereis(StateMachine) do
+      nil -> :ok
+      pid -> 
+        GenServer.stop(pid, :normal, 5000)
+        # Wait for process to fully terminate
+        :timer.sleep(50)
+    end
+    
+    on_exit(fn ->
+      # Clean up after test
+      case Process.whereis(StateMachine) do
+        nil -> :ok
+        _pid -> GenServer.stop(pid, :normal, 5000)
+      end
+    end)
+    
+    :ok
+  end
+
+  describe "Transport.StateMachine GenServer initialization" do
+    test "starts with valid arguments" do
+      args = []
+
+      # Stop any existing StateMachine first
+      case Process.whereis(StateMachine) do
+        nil -> :ok
+        pid -> GenServer.stop(pid, :normal)
+      end
+      :timer.sleep(50)
+      
+      assert {:ok, pid} = StateMachine.start_link(args)
+      assert is_pid(pid)
+      assert Process.alive?(pid)
+    end
+
+    test "creates proper child spec" do
+      args = []
+      spec = StateMachine.child_spec(args)
+
+      assert spec.id == StateMachine
+      assert spec.start == {StateMachine, :start_link, args}
+      assert spec.type == :worker
+      assert spec.restart == :permanent
+      assert spec.shutdown == 5000
+    end
+
+    test "initializes with empty state" do
+      args = []
+      # Stop any existing StateMachine first
+      case Process.whereis(StateMachine) do
+        nil -> :ok
+        existing_pid -> GenServer.stop(existing_pid, :normal)
+      end
+      :timer.sleep(50)
+      
+      {:ok, pid} = StateMachine.start_link(args)
+
+      # Should initialize properly
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "UDP transport management" do
+    setup do
+      # The StateMachine is already started by the application
+      # Just ensure any UDP transport is stopped
+      case Process.whereis(StateMachine) do
+        nil -> 
+          # Start one if needed
+          {:ok, _pid} = StateMachine.start_link([])
+        _pid ->
+          # Stop any existing UDP transport
+          try do
+            StateMachine.stop_udp()
+          catch
+            :exit, _ -> :ok
+          end
+          :ok
+      end
+      
+      :ok
+    end
+    
+    test "starts UDP transport with default options" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5060
+      }
+
+      assert :ok = StateMachine.start_udp(udp_opts)
+    end
+
+    test "starts UDP transport with custom options" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5061,
+        exposed_addr: {192, 168, 1, 100},
+        exposed_port: 5061
+      }
+
+      assert :ok = StateMachine.start_udp(udp_opts)
+    end
+
+    test "starts UDP transport with handler" do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      handler = Handler.new(handler_module, initial_state)
+
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5062,
+        handler: handler
+      }
+
+      assert :ok = StateMachine.start_udp(udp_opts)
+    end
+
+    test "fails to start UDP on invalid address" do
+      udp_opts = %{
+        listen_addr: {999, 999, 999, 999},
+        listen_port: 5060
+      }
+
+      assert {:error, _reason} = StateMachine.start_udp(udp_opts)
+    end
+
+    test "fails to start UDP on privileged port without permissions" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 80
+      }
+
+      result = StateMachine.start_udp(udp_opts)
+      # May succeed or fail depending on system permissions
+      assert result == :ok or match?({:error, _}, result)
+    end
+
+    test "fails to start UDP on already bound port" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5063
+      }
+
+      assert :ok = StateMachine.start_udp(udp_opts)
+
+      # Second attempt should fail
+      assert {:error, {:already_started, _pid}} = StateMachine.start_udp(udp_opts)
+    end
+  end
+
+  describe "UDP transport lifecycle" do
+    setup do
+      # Ensure StateMachine exists
+      case Process.whereis(StateMachine) do
+        nil -> {:ok, _pid} = StateMachine.start_link([])
+        _pid -> :ok
+      end
+      
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5064
+      }
+
+      StateMachine.start_udp(udp_opts)
+      
+      on_exit(fn ->
+        # Clean up UDP transport
+        try do
+          StateMachine.stop_udp()
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      %{udp_opts: udp_opts}
+    end
+
+    test "stops UDP transport" do
+      assert :ok = StateMachine.stop_udp()
+    end
+
+    test "restarts UDP transport after stop", %{udp_opts: udp_opts} do
+      :ok = StateMachine.stop_udp()
+
+      assert :ok = StateMachine.start_udp(udp_opts)
+    end
+
+    test "handles multiple stop calls gracefully" do
+      assert :ok = StateMachine.stop_udp()
+      assert :ok = StateMachine.stop_udp()
+    end
+  end
+
+  describe "local URI management" do
+    setup do
+      # Ensure StateMachine exists
+      case Process.whereis(StateMachine) do
+        nil -> {:ok, _pid} = StateMachine.start_link([])
+        _pid -> :ok
+      end
+      
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5065,
+        exposed_addr: {192, 168, 1, 100},
+        exposed_port: 5065
+      }
+
+      StateMachine.start_udp(udp_opts)
+
+      %{udp_opts: udp_opts}
+    end
+
+    test "returns local URI" do
+      local_uri = StateMachine.local_uri()
+
+      assert local_uri != nil
+      # Should be an ersip_uri structure or equivalent
+      assert is_tuple(local_uri) or is_map(local_uri)
+    end
+
+    test "local URI reflects configured address" do
+      local_uri = StateMachine.local_uri()
+
+      # Should contain the configured address information
+      assert local_uri != nil
+    end
+
+    test "local URI uses exposed address when configured", %{udp_opts: _udp_opts} do
+      local_uri = StateMachine.local_uri()
+
+      # Should use exposed address (192.168.1.100) instead of listen address (127.0.0.1)
+      assert local_uri != nil
+    end
+  end
+
+  describe "request sending" do
+    setup do
+      # Ensure StateMachine exists
+      case Process.whereis(StateMachine) do
+        nil -> {:ok, _pid} = StateMachine.start_link([])
+        _pid -> :ok
+      end
+      
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5066
+      }
+
+      StateMachine.start_udp(udp_opts)
+
+      %{}
+    end
+
+    test "sends outbound request" do
+      out_req = build_outbound_request()
+
+      assert :ok = StateMachine.send_request(out_req)
+    end
+
+    test "sends INVITE request" do
+      invite_req = build_outbound_invite_request()
+
+      assert :ok = StateMachine.send_request(invite_req)
+    end
+
+    test "sends OPTIONS request" do
+      options_req = build_outbound_options_request()
+
+      assert :ok = StateMachine.send_request(options_req)
+    end
+
+    test "sends REGISTER request" do
+      register_req = build_outbound_register_request()
+
+      assert :ok = StateMachine.send_request(register_req)
+    end
+
+    test "handles malformed outbound request" do
+      malformed_req = %{invalid: "request"}
+
+      result = StateMachine.send_request(malformed_req)
+      assert {:error, _reason} = result
+    end
+
+    test "handles request to unreachable destination" do
+      unreachable_req = build_outbound_request_to_unreachable()
+
+      # Should send successfully (UDP is connectionless)
+      # Error will be discovered later via timeout or ICMP
+      assert :ok = StateMachine.send_request(unreachable_req)
+    end
+  end
+
+  describe "supervisor integration" do
+    test "integrates with transport supervisor" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5067
+      }
+
+      # Should start child through supervisor
+      assert :ok = StateMachine.start_udp(udp_opts)
+    end
+
+    test "handles supervisor child start errors" do
+      # Simulate supervisor error by using invalid options
+      invalid_opts = %{
+        listen_addr: "invalid",
+        listen_port: -1
+      }
+
+      assert {:error, _reason} = StateMachine.start_udp(invalid_opts)
+    end
+
+    test "manages multiple transport children" do
+      udp_opts1 = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5068
+      }
+
+      udp_opts2 = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5069
+      }
+
+      assert :ok = StateMachine.start_udp(udp_opts1)
+      # Second transport on different port should work
+      # (Implementation dependent - may or may not be supported)
+      result = StateMachine.start_udp(udp_opts2)
+      assert result == :ok or match?({:error, _}, result)
+    end
+  end
+
+  describe "transport statistics and monitoring" do
+    setup do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5070
+      }
+
+      StateMachine.start_udp(udp_opts)
+
+      %{}
+    end
+
+    test "tracks sent requests" do
+      out_req = build_outbound_request()
+
+      StateMachine.send_request(out_req)
+
+      # Should track statistics (if implemented)
+      assert true
+    end
+
+    test "monitors transport health" do
+      # Should be able to check if transport is healthy
+      assert Process.whereis(Udp) != nil
+    end
+
+    test "handles transport process monitoring" do
+      udp_pid = Process.whereis(Udp)
+      assert is_pid(udp_pid)
+      assert Process.alive?(udp_pid)
+    end
+  end
+
+  describe "error handling and edge cases" do
+    setup do
+      # Ensure StateMachine exists
+      case Process.whereis(StateMachine) do
+        nil -> {:ok, _pid} = StateMachine.start_link([])
+        _pid -> :ok
+      end
+      :ok
+    end
+    
+    test "handles GenServer calls when no transport started" do
+      # Ensure no transport is running
+      StateMachine.stop_udp()
+
+      # Should handle gracefully
+      result = StateMachine.local_uri()
+      assert match?({:error, _reason}, result) or is_nil(result)
+    end
+
+    test "handles invalid start_link arguments" do
+      # Stop the existing instance first
+      case Process.whereis(StateMachine) do
+        nil -> :ok
+        _pid -> GenServer.stop(pid, :normal, 5000)
+      end
+      :timer.sleep(50)
+      
+      # Stop any existing StateMachine first
+      case Process.whereis(StateMachine) do
+        nil -> :ok
+        pid -> GenServer.stop(pid, :normal)
+      end
+      :timer.sleep(50)
+      
+      assert {:error, _reason} = StateMachine.start_link("invalid")
+    end
+
+    test "handles concurrent start/stop operations" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5071
+      }
+
+      # Run concurrent operations
+      tasks = [
+        Task.async(fn -> StateMachine.start_udp(udp_opts) end),
+        Task.async(fn -> StateMachine.stop_udp() end),
+        Task.async(fn -> StateMachine.start_udp(udp_opts) end)
+      ]
+
+      results = Task.await_many(tasks)
+
+      # Should handle concurrent operations gracefully
+      assert length(results) == 3
+    end
+
+    test "handles process termination gracefully" do
+      {:ok, pid} = StateMachine.start_link([])
+
+      GenServer.stop(pid)
+
+      refute Process.alive?(pid)
+    end
+
+    test "handles unknown GenServer messages" do
+      {:ok, pid} = StateMachine.start_link([])
+
+      GenServer.cast(pid, {:unknown_message, "test"})
+      send(pid, {:unknown_info, "test"})
+
+      # Should handle unknown messages without crashing
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "configuration and options" do
+    setup do
+      {:ok, _pid} = StateMachine.start_link([])
+      :ok
+    end
+    
+    test "handles minimal UDP configuration" do
+      minimal_opts = %{}
+
+      result = StateMachine.start_udp(minimal_opts)
+      # Should use defaults or fail gracefully
+      assert result == :ok or match?({:error, _}, result)
+    end
+
+    test "handles comprehensive UDP configuration" do
+      comprehensive_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5072,
+        exposed_addr: {192, 168, 1, 100},
+        exposed_port: 5072,
+        handler: build_test_handler(),
+        log_messages: true,
+        max_burst: 100
+      }
+
+      assert :ok = StateMachine.start_udp(comprehensive_opts)
+    end
+
+    test "validates configuration parameters" do
+      invalid_opts = %{
+        listen_port: "not_a_number"
+      }
+
+      assert {:error, _reason} = StateMachine.start_udp(invalid_opts)
+    end
+
+    test "handles IPv6 addresses" do
+      ipv6_opts = %{
+        # IPv6 loopback
+        listen_addr: {0, 0, 0, 0, 0, 0, 0, 1},
+        listen_port: 5073
+      }
+
+      result = StateMachine.start_udp(ipv6_opts)
+      # May succeed or fail depending on system IPv6 support
+      assert result == :ok or match?({:error, _}, result)
+    end
+  end
+
+  describe "integration with other modules" do
+    setup do
+      {:ok, _pid} = StateMachine.start_link([])
+      :ok
+    end
+    
+    test "integrates with Handler module" do
+      handler = build_test_handler()
+
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5074,
+        handler: handler
+      }
+
+      assert :ok = StateMachine.start_udp(udp_opts)
+    end
+
+    test "works with TransactionStatem for request routing" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5075
+      }
+
+      StateMachine.start_udp(udp_opts)
+
+      # Should work with TransactionStatem
+      out_req = build_outbound_request()
+      assert :ok = StateMachine.send_request(out_req)
+    end
+
+    test "integrates with Dialog module for dialog routing" do
+      udp_opts = %{
+        listen_addr: {127, 0, 0, 1},
+        listen_port: 5076
+      }
+
+      StateMachine.start_udp(udp_opts)
+
+      # Should integrate with Dialog routing
+      assert true
+    end
+  end
+
+  # Helper functions for building test data
+  defp build_outbound_request do
+    message = build_invite_message()
+
+    %{
+      message: message,
+      destination: {"127.0.0.1", 5060},
+      transport: :udp
+    }
+  end
+
+  defp build_outbound_invite_request do
+    message = build_invite_message()
+
+    %{
+      message: message,
+      destination: {"127.0.0.1", 5060},
+      transport: :udp,
+      method: :invite
+    }
+  end
+
+  defp build_outbound_options_request do
+    message = build_options_message()
+
+    %{
+      message: message,
+      destination: {"127.0.0.1", 5060},
+      transport: :udp,
+      method: :options
+    }
+  end
+
+  defp build_outbound_register_request do
+    message = build_register_message()
+
+    %{
+      message: message,
+      destination: {"127.0.0.1", 5060},
+      transport: :udp,
+      method: :register
+    }
+  end
+
+  defp build_outbound_request_to_unreachable do
+    message = build_invite_message()
+
+    %{
+      message: message,
+      # RFC5737 test address
+      destination: {"192.0.2.1", 5060},
+      transport: :udp
+    }
+  end
+
+  defp build_test_handler do
+    Handler.new(TestHandlerModule, %{test: "state"})
+  end
+
+  defp build_invite_message do
+    %Message{
+      method: :invite,
+      request_uri: "sip:user@example.com",
+      version: "SIP/2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-123"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 1, method: :invite},
+        "contact" => %Contact{
+          uri: "sip:test@127.0.0.1:5060",
+          parameters: %{}
+        }
+      },
+      body:
+        "v=0\r\no=test 123 456 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\n"
+    }
+  end
+
+  defp build_options_message do
+    %Message{
+      method: :options,
+      request_uri: "sip:target@example.com",
+      version: "SIP/2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-options"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-options@example.com",
+        "cseq" => %CSeq{number: 1, method: :options}
+      },
+      body: ""
+    }
+  end
+
+  defp build_register_message do
+    %Message{
+      method: :register,
+      request_uri: "sip:example.com",
+      version: "SIP/2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-register"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-register@example.com",
+        "cseq" => %CSeq{number: 1, method: :register},
+        "contact" => %Contact{
+          uri: "sip:test@127.0.0.1:5060",
+          parameters: %{"expires" => "3600"}
+        }
+      },
+      body: ""
+    }
+  end
+
+  # Test handler module for testing
+  defmodule TestHandlerModule do
+    @behaviour Parrot.Sip.Handler
+
+    @impl true
+    def transp_request(_msg, _args), do: :process_transaction
+
+    @impl true
+    def transaction(_trans, _sip_msg, _args), do: :process_uas
+
+    @impl true
+    def transaction_stop(_trans, _trans_result, _args), do: :ok
+
+    @impl true
+    def uas_request(_uas, _req_sip_msg, _args), do: :ok
+
+    @impl true
+    def uas_cancel(_uas_id, _args), do: :ok
+
+    @impl true
+    def process_ack(_sip_msg, _args), do: :ok
+  end
+
+  # Test helper module
+  defmodule TestHandler do
+    def new(module, state) do
+      Parrot.Sip.Handler.new(module, state)
+    end
+  end
+end

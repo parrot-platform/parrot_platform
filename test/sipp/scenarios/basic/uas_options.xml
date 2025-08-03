@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<scenario name="Basic UAS OPTIONS">
+  <!-- Wait for OPTIONS request -->
+  <recv request="OPTIONS">
+  </recv>
+
+  <!-- Send 200 OK response -->
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Allow: INVITE, ACK, CANCEL, OPTIONS, BYE
+      Accept: application/sdp
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- Wait for client to terminate the call -->
+  <pause milliseconds="1000"/>
+
+</scenario>

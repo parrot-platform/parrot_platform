@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        otp: ['26.x', '27.x']
+        elixir: ['1.18.x']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        otp-version: ${{matrix.otp}}
+        elixir-version: ${{matrix.elixir}}
+    
+    - name: Restore dependencies cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+        restore-keys: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+    
+    - name: Install dependencies
+      run: mix deps.get
+    
+    - name: Check formatting
+      run: mix format --check-formatted
+    
+    - name: Compile without warnings
+      run: mix compile --warnings-as-errors
+    
+    - name: Run tests
+      run: mix test
+    
+    # Optional: Run dialyzer for type checking
+    # - name: Run dialyzer
+    #   run: mix dialyzer
+    #   if: matrix.elixir == '1.18.x' && matrix.otp == '26.x'
+
+  # Optional: Check documentation can be generated
+  docs:
+    name: Generate docs
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        otp-version: '27.x'
+        elixir-version: '1.18.x'
+    - name: Install dependencies
+      run: mix deps.get
+    - name: Generate docs
+      run: mix docs

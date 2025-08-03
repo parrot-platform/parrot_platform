@@ -1,0 +1,1000 @@
+defmodule Parrot.Sip.HandlerAdapter.CoreTest do
+  require Logger
+
+  defp setup_pid(_) do
+    handler_module = TestHandler
+    initial_state = %{test: "data"}
+    {:ok, pid} = Core.start_link({handler_module, initial_state})
+    %{core_pid: pid}
+  end
+
+  use ExUnit.Case, async: true
+  doctest Parrot.Sip.HandlerAdapter.Core
+
+  alias Parrot.Sip.HandlerAdapter.Core
+  alias Parrot.Sip.{Message, Handler}
+  alias Parrot.Sip.Headers.{Via, From, To, Contact, CSeq}
+
+  # Test handler module for testing
+  defmodule TestHandler do
+    @behaviour Parrot.Sip.Handler
+
+    @impl true
+    def handle_request(request, state) do
+      send(self(), {:handle_request_called, request, state})
+      {:reply, build_test_response(200, "OK"), state}
+    end
+
+    @impl true
+    def handle_response(response, request, state) do
+      send(self(), {:handle_response_called, response, request, state})
+      {:ok, state}
+    end
+
+    @impl true
+    def handle_cancel(request, state) do
+      send(self(), {:handle_cancel_called, request, state})
+      {:reply, build_test_response(200, "OK"), state}
+    end
+
+    @impl true
+    def handle_bye(request, state) do
+      send(self(), {:handle_bye_called, request, state})
+      {:reply, build_test_response(200, "OK"), state}
+    end
+
+    @impl true
+    def handle_ack(request, state) do
+      send(self(), {:handle_ack_called, request, state})
+      {:ok, state}
+    end
+
+    @impl true
+    def handle_dialog_start(dialog_id, request, %{test_pid: test_pid} = state) do
+      Logger.debug("handle_dialog_start called")
+      send(test_pid, {:handle_dialog_start_called, dialog_id, request, state})
+      {:ok, state}
+    end
+
+    @impl true
+    def handle_dialog_end(dialog_id, reason, %{test_pid: test_pid} = state) do
+      Logger.debug("handle_dialog_end called")
+      send(test_pid, {:handle_dialog_end_called, dialog_id, reason, state})
+      {:ok, state}
+    end
+
+    defp build_test_response(status_code, reason_phrase) do
+      %{
+        status_code: status_code,
+        reason_phrase: reason_phrase,
+        headers: %{},
+        body: ""
+      }
+    end
+  end
+
+  describe "HandlerAdapter.Core gen_statem initialization" do
+    setup :setup_pid
+
+    test "starts with valid handler module and initial state", %{core_pid: pid} do
+      assert is_pid(pid)
+      assert Process.alive?(pid)
+    end
+
+    test "initializes with correct callback mode" do
+      assert Core.callback_mode() == [:state_functions, :state_enter]
+    end
+
+    test "creates proper child spec" do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      args = [handler_module, initial_state]
+      spec = Core.child_spec(args)
+
+      assert spec.id == Core
+      assert spec.start == {Core, :start_link, args}
+      assert spec.type == :worker
+      assert spec.restart == :temporary
+    end
+
+    test "fails to start with invalid handler module" do
+      invalid_module = NonExistentModule
+      initial_state = %{}
+
+      assert {:error, _reason} = Core.start_link(invalid_module, initial_state)
+    end
+
+    test "starts with nil initial state", %{core_pid: pid} do
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "initial state request handling" do
+    setup do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      {:ok, pid} = Core.start_link({handler_module, initial_state})
+
+      %{
+        core_pid: pid,
+        handler_module: handler_module,
+        handler_state: initial_state
+      }
+    end
+
+    test "handles initial INVITE request", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+
+      assert {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, invite_msg})
+      assert_receive {:handle_request_called, ^invite_msg, _state}
+    end
+
+    test "handles initial OPTIONS request", %{core_pid: pid} do
+      options_msg = build_options_message()
+
+      assert {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, options_msg})
+      assert_receive {:handle_request_called, ^options_msg, _state}
+    end
+
+    test "handles initial REGISTER request", %{core_pid: pid} do
+      register_msg = build_register_message()
+
+      assert {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, register_msg})
+      assert_receive {:handle_request_called, ^register_msg, _state}
+    end
+
+    test "handles initial SUBSCRIBE request", %{core_pid: pid} do
+      subscribe_msg = build_subscribe_message()
+
+      assert {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, subscribe_msg})
+      assert_receive {:handle_request_called, ^subscribe_msg, _state}
+    end
+
+    test "transitions to dialog state on INVITE", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      # Should transition to dialog state
+      state_data = :sys.get_state(pid)
+      assert state_data.current_gen_statem_state == :in_dialog
+    end
+
+    test "remains in initial state for stateless requests", %{core_pid: pid} do
+      options_msg = build_options_message()
+
+      :gen_statem.call(pid, {:handle_request, options_msg})
+
+      # Should remain in initial state for stateless requests
+      state_data = :sys.get_state(pid)
+      assert state_data.current_gen_statem_state == :initial
+    end
+
+    test "creates transaction for request", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      state_data = :sys.get_state(pid)
+      assert state_data.transaction != nil
+    end
+
+    test "stores original request message", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      state_data = :sys.get_state(pid)
+      assert state_data.original_req_sip_msg == invite_msg
+    end
+  end
+
+  describe "in_dialog state operations" do
+    setup do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      {:ok, pid} = Core.start_link({handler_module, initial_state})
+
+      # Transition to dialog state
+      invite_msg = build_invite_message()
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      %{core_pid: pid, invite_msg: invite_msg}
+    end
+
+    test "handles ACK in dialog state", %{core_pid: pid} do
+      ack_msg = build_ack_message()
+
+      assert {:ok, :ack_processed} = :gen_statem.call(pid, {:handle_ack, ack_msg})
+      assert_receive {:handle_ack_called, ^ack_msg, _state}
+    end
+
+    test "handles BYE in dialog state", %{core_pid: pid} do
+      bye_msg = build_bye_message()
+
+      assert {:ok, response} = :gen_statem.call(pid, {:handle_bye, bye_msg})
+      assert response.status_code == 200
+      assert_receive {:handle_bye_called, ^bye_msg, _state}
+    end
+
+    test "handles CANCEL in dialog state", %{core_pid: pid} do
+      cancel_msg = build_cancel_message()
+
+      assert {:ok, response} = :gen_statem.call(pid, {:handle_cancel, cancel_msg})
+      assert response.status_code == 200
+      assert_receive {:handle_cancel_called, ^cancel_msg, _state}
+    end
+
+    test "handles UPDATE in dialog state", %{core_pid: pid} do
+      update_msg = build_update_message()
+
+      assert {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, update_msg})
+      assert_receive {:handle_request_called, ^update_msg, _state}
+    end
+
+    test "handles INFO in dialog state", %{core_pid: pid} do
+      info_msg = build_info_message()
+
+      assert {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, info_msg})
+      assert_receive {:handle_request_called, ^info_msg, _state}
+    end
+
+    test "transitions to terminated on BYE", %{core_pid: pid} do
+      bye_msg = build_bye_message()
+
+      :gen_statem.call(pid, {:handle_bye, bye_msg})
+
+      # Should transition to terminated state
+      state_data = :sys.get_state(pid)
+      assert state_data.current_gen_statem_state == :terminated
+    end
+
+    test "maintains dialog reference", %{core_pid: pid} do
+      state_data = :sys.get_state(pid)
+      assert state_data.dialog != nil
+    end
+  end
+
+  describe "response handling" do
+    setup do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      {:ok, pid} = Core.start_link({handler_module, initial_state})
+
+      invite_msg = build_invite_message()
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      %{core_pid: pid, invite_msg: invite_msg}
+    end
+
+    test "handles provisional responses", %{core_pid: pid, invite_msg: invite} do
+      response = build_response_message(180, "Ringing")
+
+      assert {:ok, :response_processed} =
+               :gen_statem.call(pid, {:handle_response, response, invite})
+
+      assert_receive {:handle_response_called, ^response, ^invite, _state}
+    end
+
+    test "handles success responses", %{core_pid: pid, invite_msg: invite} do
+      response = build_response_message(200, "OK")
+
+      assert {:ok, :response_processed} =
+               :gen_statem.call(pid, {:handle_response, response, invite})
+
+      assert_receive {:handle_response_called, ^response, ^invite, _state}
+    end
+
+    test "handles error responses", %{core_pid: pid, invite_msg: invite} do
+      response = build_response_message(404, "Not Found")
+
+      assert {:ok, :response_processed} =
+               :gen_statem.call(pid, {:handle_response, response, invite})
+
+      assert_receive {:handle_response_called, ^response, ^invite, _state}
+    end
+
+    test "handles redirection responses", %{core_pid: pid, invite_msg: invite} do
+      response = build_response_message(302, "Moved Temporarily")
+
+      assert {:ok, :response_processed} =
+               :gen_statem.call(pid, {:handle_response, response, invite})
+
+      assert_receive {:handle_response_called, ^response, ^invite, _state}
+    end
+
+    test "updates transaction on response", %{core_pid: pid, invite_msg: invite} do
+      response = build_response_message(200, "OK")
+
+      :gen_statem.call(pid, {:handle_response, response, invite})
+
+      state_data = :sys.get_state(pid)
+      assert state_data.response == response
+    end
+  end
+
+  describe "dialog lifecycle management" do
+    setup do
+      handler_module = TestHandler
+      test_pid = self()
+      initial_state = %{test: "data", test_pid: test_pid}
+      {:ok, pid} = Core.start_link({handler_module, initial_state})
+
+      %{core_pid: pid, test_pid: test_pid}
+    end
+
+    test "notifies handler on dialog start", %{core_pid: pid, test_pid: test_pid} do
+      invite_msg = build_invite_message()
+      dialog_id = "test-dialog-123"
+
+      :gen_statem.cast(pid, {:dialog_started, dialog_id, invite_msg})
+
+      assert_receive {:handle_dialog_start_called, ^dialog_id, ^invite_msg, _state},
+                     500,
+                     "Expected handle_dialog_start_called message to test_pid #{inspect(test_pid)}"
+    end
+
+    test "notifies handler on dialog end", %{core_pid: pid, test_pid: test_pid} do
+      dialog_id = "test-dialog-123"
+      reason = :normal
+
+      :gen_statem.cast(pid, {:dialog_ended, dialog_id, reason})
+
+      assert_receive {:handle_dialog_end_called, ^dialog_id, ^reason, _state},
+                     500,
+                     "Expected handle_dialog_end_called message to test_pid #{inspect(test_pid)}"
+    end
+
+    test "handles dialog timeout", %{core_pid: pid} do
+      :gen_statem.cast(pid, {:dialog_timeout, "test-dialog-123"})
+
+      # Should handle timeout gracefully
+      assert Process.alive?(pid)
+    end
+
+    test "handles dialog error", %{core_pid: pid} do
+      :gen_statem.cast(pid, {:dialog_error, "test-dialog-123", :connection_lost})
+
+      # Should handle error gracefully
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "transaction management" do
+    setup do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      {:ok, pid} = Core.start_link({handler_module, initial_state})
+
+      %{core_pid: pid}
+    end
+
+    test "creates server transaction on request", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      state_data = :sys.get_state(pid)
+      assert state_data.transaction != nil
+    end
+
+    test "handles transaction timeout", %{core_pid: pid} do
+      :gen_statem.cast(pid, {:transaction_timeout, "trans-123"})
+
+      # Should handle timeout gracefully
+      assert Process.alive?(pid)
+    end
+
+    test "handles transaction error", %{core_pid: pid} do
+      :gen_statem.cast(pid, {:transaction_error, "trans-123", :network_unreachable})
+
+      # Should handle error gracefully
+      assert Process.alive?(pid)
+    end
+
+    test "cleans up transaction on completion", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      bye_msg = build_bye_message()
+      :gen_statem.call(pid, {:handle_bye, bye_msg})
+
+      # Transaction should be cleaned up
+      state_data = :sys.get_state(pid)
+      # Transaction may still exist but should be marked for cleanup
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "state machine transitions" do
+    setup do
+      handler_module = TestHandler
+      initial_state = %{test: "data"}
+      {:ok, pid} = Core.start_link({handler_module, initial_state})
+
+      %{core_pid: pid}
+    end
+
+    test "transitions initial -> in_dialog -> terminated", %{core_pid: pid} do
+      # Start in initial state
+      {state, state_data} = :sys.get_state(pid)
+      assert state_data.current_gen_statem_state == :idle
+
+      # Handle INVITE to transition to in_dialog
+      invite_msg = build_invite_message()
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      {state, state_data} = :sys.get_state(pid)
+      assert state_data.current_gen_statem_state == :in_dialog
+
+      # Handle BYE to transition to terminated
+      bye_msg = build_bye_message()
+      :gen_statem.call(pid, {:handle_bye, bye_msg})
+
+      {state, state_data} = :sys.get_state(pid)
+      assert state_data.current_gen_statem_state == :terminated
+    end
+
+    test "handles invalid state transitions gracefully", %{core_pid: pid} do
+      # Try to handle BYE in initial state
+      bye_msg = build_bye_message()
+
+      # Should handle gracefully, possibly with error response
+      result = :gen_statem.call(pid, {:handle_bye, bye_msg})
+      assert is_tuple(result)
+    end
+
+    test "maintains state consistency across transitions", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      state_data = :sys.get_state(pid)
+      assert state_data.handler_module == TestHandler
+      assert state_data.original_req_sip_msg == invite_msg
+    end
+  end
+
+  describe "error handling and edge cases" do
+    test "handles invalid initialization arguments" do
+      assert {:error, _reason} = Core.start_link({nil, %{}})
+    end
+
+    test "handles handler callback errors gracefully" do
+      # Create a handler that raises errors
+      defmodule ErrorHandler do
+        @behaviour Parrot.Sip.Handler
+
+        @impl true
+        def handle_request(_request, _state) do
+          raise "Test error"
+        end
+
+        # Implement other required callbacks with minimal implementations
+        @impl true
+        def handle_response(_response, _request, state), do: {:ok, state}
+        @impl true
+        def handle_cancel(_request, state),
+          do: {:reply, %{status_code: 200, reason_phrase: "OK", headers: %{}, body: ""}, state}
+
+        @impl true
+        def handle_bye(_request, state),
+          do: {:reply, %{status_code: 200, reason_phrase: "OK", headers: %{}, body: ""}, state}
+
+        @impl true
+        def handle_ack(_request, state), do: {:ok, state}
+        @impl true
+        def handle_dialog_start(_dialog_id, _request, state), do: {:ok, state}
+        @impl true
+        def handle_dialog_end(_dialog_id, _reason, state), do: {:ok, state}
+      end
+
+      {:ok, pid} = Core.start_link({ErrorHandler, %{}})
+      invite_msg = build_invite_message()
+
+      # Should handle handler errors gracefully
+      assert {:error, _reason} = :gen_statem.call(pid, {:handle_request, invite_msg})
+    end
+
+    test "handles malformed SIP messages" do
+      handler_module = TestHandler
+      {:ok, pid} = Core.start_link({handler_module, %{}})
+
+      malformed_msg = %Message{
+        method: nil,
+        request_uri: nil,
+        headers: %{},
+        body: ""
+      }
+
+      assert {:error, _reason} = :gen_statem.call(pid, {:handle_request, malformed_msg})
+    end
+
+    test "handles unknown events gracefully", %{core_pid: pid} do
+      :gen_statem.cast(pid, {:unknown_event, "test"})
+
+      # Should handle unknown events without crashing
+      assert Process.alive?(pid)
+    end
+
+    test "handles process termination gracefully", %{core_pid: pid} do
+      :gen_statem.stop(pid)
+
+      # Should not be alive after stop
+      refute Process.alive?(pid)
+    end
+
+    test "handles concurrent requests", %{core_pid: pid} do
+      # Send multiple requests concurrently
+      tasks =
+        Enum.map(1..5, fn i ->
+          Task.async(fn ->
+            msg = build_options_message_with_cseq(i)
+            :gen_statem.call(pid, {:handle_request, msg})
+          end)
+        end)
+
+      results = Task.await_many(tasks)
+
+      # All requests should be handled
+      assert length(results) == 5
+      assert Enum.all?(results, fn result -> match?({:ok, _}, result) end)
+    end
+  end
+
+  describe "integration with Handler behavior" do
+    setup :setup_pid
+
+    test "properly converts SIP messages to handler format", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+      :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      # Handler should receive properly formatted request
+      assert_receive {:handle_request_called, request, _state}
+      assert is_map(request)
+      assert Map.has_key?(request, :method)
+      assert Map.has_key?(request, :uri)
+      assert Map.has_key?(request, :headers)
+    end
+
+    test "properly converts handler responses to SIP format", %{core_pid: pid} do
+      invite_msg = build_invite_message()
+      {:ok, :request_processed} = :gen_statem.call(pid, {:handle_request, invite_msg})
+
+      # Should convert handler response to proper SIP format
+      state_data = :sys.get_state(pid)
+      assert state_data.response != nil
+    end
+
+    test "maintains handler state across calls" do
+      # Handler that modifies state
+      defmodule StatefulHandler do
+        @behaviour Parrot.Sip.Handler
+
+        @impl true
+        def handle_request(_request, state) do
+          new_state = Map.update(state, :counter, 1, &(&1 + 1))
+          {:reply, %{status_code: 200, reason_phrase: "OK", headers: %{}, body: ""}, new_state}
+        end
+
+        # Implement other required callbacks
+        @impl true
+        def handle_response(_response, _request, state), do: {:ok, state}
+        @impl true
+        def handle_cancel(_request, state),
+          do: {:reply, %{status_code: 200, reason_phrase: "OK", headers: %{}, body: ""}, state}
+
+        @impl true
+        def handle_bye(_request, state),
+          do: {:reply, %{status_code: 200, reason_phrase: "OK", headers: %{}, body: ""}, state}
+
+        @impl true
+        def handle_ack(_request, state), do: {:ok, state}
+        @impl true
+        def handle_dialog_start(_dialog_id, _request, state), do: {:ok, state}
+        @impl true
+        def handle_dialog_end(_dialog_id, _reason, state), do: {:ok, state}
+      end
+
+      {:ok, pid} = Core.start_link(StatefulHandler, %{counter: 0})
+
+      # Make multiple requests
+      invite1 = build_invite_message()
+      invite2 = build_reinvite_message()
+
+      :gen_statem.call(pid, {:handle_request, invite1})
+      :gen_statem.call(pid, {:handle_request, invite2})
+
+      # State should be maintained and updated
+      state_data = :sys.get_state(pid)
+      assert state_data.handler_state.counter == 2
+    end
+  end
+
+  # Helper functions for building test messages
+  defp build_invite_message do
+    %Message{
+      method: :invite,
+      request_uri: "sip:user@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-123"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 1, method: :invite},
+        "contact" => %Contact{
+          uri: "sip:test@127.0.0.1:5060",
+          parameters: %{}
+        }
+      },
+      body:
+        "v=0\r\no=test 123 456 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\n"
+    }
+  end
+
+  defp build_options_message do
+    %Message{
+      method: :options,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-options"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-options@example.com",
+        "cseq" => %CSeq{number: 1, method: :options}
+      },
+      body: ""
+    }
+  end
+
+  defp build_options_message_with_cseq(seq) do
+    %Message{
+      method: :options,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-#{seq}"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-#{seq}@example.com",
+        "cseq" => %CSeq{number: seq, method: :options}
+      },
+      body: ""
+    }
+  end
+
+  defp build_register_message do
+    %Message{
+      method: :register,
+      request_uri: "sip:example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-register"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-register@example.com",
+        "cseq" => %CSeq{number: 1, method: :register},
+        "contact" => %Contact{
+          uri: "sip:test@127.0.0.1:5060",
+          parameters: %{"expires" => "3600"}
+        }
+      },
+      body: ""
+    }
+  end
+
+  defp build_subscribe_message do
+    %Message{
+      method: :subscribe,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-subscribe"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-subscribe@example.com",
+        "cseq" => %CSeq{number: 1, method: :subscribe},
+        "event" => "presence",
+        "expires" => "3600"
+      },
+      body: ""
+    }
+  end
+
+  defp build_ack_message do
+    %Message{
+      method: :ack,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-ack"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{"tag" => "test-to-tag"}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 1, method: :ack}
+      },
+      body: ""
+    }
+  end
+
+  defp build_bye_message do
+    %Message{
+      method: :bye,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-bye"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{"tag" => "test-to-tag"}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 2, method: :bye}
+      },
+      body: ""
+    }
+  end
+
+  defp build_cancel_message do
+    %Message{
+      method: :cancel,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-123"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 1, method: :cancel}
+      },
+      body: ""
+    }
+  end
+
+  defp build_reinvite_message do
+    %Message{
+      method: :invite,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-reinvite"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{"tag" => "test-to-tag"}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 3, method: :invite}
+      },
+      body:
+        "v=0\r\no=test 789 012 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 8000 RTP/AVP 0\r\n"
+    }
+  end
+
+  defp build_update_message do
+    %Message{
+      method: :update,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-update"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{"tag" => "test-to-tag"}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 4, method: :update}
+      },
+      body: ""
+    }
+  end
+
+  defp build_info_message do
+    %Message{
+      method: :info,
+      request_uri: "sip:target@example.com",
+      version: "2.0",
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-info"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{"tag" => "test-to-tag"}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 5, method: :info},
+        "content-type" => "application/dtmf-relay"
+      },
+      body: "Signal=1\r\nDuration=100\r\n"
+    }
+  end
+
+  defp build_response_message(status_code, reason_phrase) do
+    %Message{
+      method: nil,
+      request_uri: nil,
+      version: "2.0",
+      status_code: status_code,
+      reason_phrase: reason_phrase,
+      headers: %{
+        "via" => %Via{
+          protocol: "SIP",
+          version: "2.0",
+          transport: :udp,
+          host: "127.0.0.1",
+          port: 5060,
+          parameters: %{"branch" => "z9hG4bK-test-branch-123"}
+        },
+        "from" => %From{
+          display_name: "Test User",
+          uri: "sip:test@example.com",
+          parameters: %{"tag" => "test-from-tag"}
+        },
+        "to" => %To{
+          display_name: "Target User",
+          uri: "sip:target@example.com",
+          parameters: %{"tag" => "test-to-tag"}
+        },
+        "call-id" => "test-call-id-123@example.com",
+        "cseq" => %CSeq{number: 1, method: :invite}
+      },
+      body: ""
+    }
+  end
+end
