@@ -4,7 +4,7 @@ defmodule Parrot.MixProject do
   def project do
     [
       app: :parrot_platform,
-      version: "0.0.1-alpha.1",
+      version: "0.0.1-alpha.2",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -90,11 +90,12 @@ defmodule Parrot.MixProject do
   defp copy_images(_) do
     # Ensure doc directory exists
     File.mkdir_p!("doc/assets")
-    
+
     # Copy logo and any other assets from assets/ to doc/assets/
     case File.cp_r("assets", "doc/assets") do
       {:ok, _} ->
         Mix.shell().info("Copied assets to doc/assets")
+
       {:error, reason, file} ->
         Mix.shell().error("Failed to copy #{file}: #{inspect(reason)}")
     end
