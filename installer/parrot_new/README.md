@@ -12,7 +12,7 @@ Or from GitHub before Hex publication:
 
 ```bash
 # Clone the repository
-git clone https://github.com/byoungdale/parrot.git
+git clone https://github.com/parrot-platform/parrot_platform.git
 cd parrot/installer/parrot_new
 mix archive.build
 mix archive.install ./parrot_new-0.0.1-alpha.1.ez
@@ -60,4 +60,4 @@ These generators create complete Parrot Platform applications with:
 - Example code and documentation
 - Test files
 
-For more information about Parrot Platform, visit: https://github.com/byoungdale/parrot
+For more information about Parrot Platform, visit: https://github.com/parrot-platform/parrot_platform

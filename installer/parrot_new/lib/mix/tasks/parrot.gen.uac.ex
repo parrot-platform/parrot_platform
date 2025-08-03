@@ -156,8 +156,7 @@ defmodule Mix.Tasks.Parrot.Gen.Uac do
 
       defp deps do
         [
-          {:parrot_platform, github: "byoungdale/parrot"}
-          # {:parrot_platform, "~> 0.0.1-alpha.1"}
+          {:parrot_platform, "~> 0.0.1-alpha.1"}
         ]
       end
     end

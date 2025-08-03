@@ -4,8 +4,8 @@ defmodule ParrotNew.MixProject do
   def project do
     [
       app: :parrot_new,
-      version: "0.0.1-alpha.1",
-      elixir: "~> 1.14",
+      version: "0.0.1-alpha.2",
+      elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "Parrot Platform project generators",
@@ -28,13 +28,18 @@ defmodule ParrotNew.MixProject do
 
   defp package do
     [
-      licenses: ["Apache-2.0"],
+      licenses: ["GPL-2.0-or-later"],
       links: %{
-        "GitHub" => "https://github.com/byoungdale/parrot"
+        "GitHub" => "https://github.com/parrot-platform/parrot_platform"
       },
       maintainers: ["Brandon Youngdale"],
       files: ~w(lib .formatter.exs mix.exs README* LICENSE*),
-      source_url: "https://github.com/byoungdale/parrot"
+      source_url: "https://github.com/parrot-platform/parrot_platform",
+      description: """
+      Parrot Platform project generators
+
+      Provides `mix parrot.gen.[uas|uac]` tasks to bootstrap new Parrot Platform applications. 
+      """
     ]
   end
 end

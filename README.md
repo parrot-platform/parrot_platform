@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/byoungdale/parrot/actions/workflows/ci.yml">
-    <img src="https://github.com/byoungdale/parrot/workflows/CI/badge.svg" alt="Build Status">
+  <a href="https://github.com/parrot-platform/parrot_platform/actions/workflows/ci.yml">
+    <img src="https://github.com/parrot-platform/parrot_platform/workflows/CI/badge.svg" alt="Build Status">
   </a>
   <a href="https://hex.pm/packages/parrot_platform">
     <img src="https://img.shields.io/hexpm/v/parrot_platform.svg" alt="Hex Version">

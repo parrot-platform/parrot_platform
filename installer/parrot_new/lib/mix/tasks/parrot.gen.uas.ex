@@ -704,8 +704,7 @@ defmodule Mix.Tasks.Parrot.Gen.Uas do
       # Run "mix help deps" to learn about dependencies.
       defp deps do
         [
-          {:parrot_platform, github: "byoungdale/parrot"}
-          # {:parrot_platform, "~> 0.0.1-alpha.1"}
+          {:parrot_platform, "~> 0.0.1-alpha.1"}
         ]
       end
     end
