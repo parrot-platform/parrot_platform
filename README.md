@@ -39,6 +39,7 @@ Get started with the Parrot Platform by follow the instructions at https://hexdo
 
 Next steps:
 - [ ] Add git push hook check for mix format
+- [ ] Get github actions working
 - [ ] add OPUS support to uas and uac examples and generators
 - [ ] better pattern matching in media modules
 - [ ] load test
