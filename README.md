@@ -13,7 +13,8 @@
     <img src="https://img.shields.io/badge/hex-docs-purple.svg" alt="Hex Docs">
   </a>
 </p>
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/parrot-platform/parrot_platform)
+
+<a href="https://deepwiki.com/parrot-platform/parrot_platform"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 
 # Parrot Platform
 
