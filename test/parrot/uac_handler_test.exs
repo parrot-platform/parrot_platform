@@ -29,7 +29,7 @@ defmodule Parrot.UacHandlerTest do
     @impl true
     def handle_success(%{status_code: 200} = response, state) do
       send(state.test_pid, {:success, response})
-      
+
       if state[:custom_ack] do
         {:send_ack, %{"x-custom" => "header"}, "custom body", Map.put(state, :got_success, true)}
       else
@@ -40,7 +40,7 @@ defmodule Parrot.UacHandlerTest do
     @impl true
     def handle_redirect(%{status_code: 302} = response, state) do
       send(state.test_pid, {:redirect, response})
-      
+
       if state[:follow_redirect] do
         {:follow_redirect, Map.put(state, :got_redirect, true)}
       else
@@ -129,10 +129,11 @@ defmodule Parrot.UacHandlerTest do
       callback = create_test_callback()
 
       # Create 200 OK response to INVITE
-      invite_response = create_response(200, "OK", %{
-        "cseq" => %CSeq{number: 1, method: "INVITE"},
-        "contact" => %Contact{uri: "sip:user@example.com"}
-      })
+      invite_response =
+        create_response(200, "OK", %{
+          "cseq" => %CSeq{number: 1, method: "INVITE"},
+          "contact" => %Contact{uri: "sip:user@example.com"}
+        })
 
       # Should process the response
       callback.({:response, invite_response})
@@ -143,10 +144,11 @@ defmodule Parrot.UacHandlerTest do
     test "handles success response to INVITE with custom ACK" do
       callback = create_test_callback(%{custom_ack: true})
 
-      invite_response = create_response(200, "OK", %{
-        "cseq" => %CSeq{number: 1, method: "INVITE"},
-        "contact" => %Contact{uri: "sip:user@example.com"}
-      })
+      invite_response =
+        create_response(200, "OK", %{
+          "cseq" => %CSeq{number: 1, method: "INVITE"},
+          "contact" => %Contact{uri: "sip:user@example.com"}
+        })
 
       callback.({:response, invite_response})
 
@@ -156,10 +158,11 @@ defmodule Parrot.UacHandlerTest do
     test "handles redirect responses" do
       callback = create_test_callback()
 
-      redirect_response = create_response(302, "Moved Temporarily", %{
-        "contact" => %Contact{uri: "sip:new@location.com"}
-      })
-      
+      redirect_response =
+        create_response(302, "Moved Temporarily", %{
+          "contact" => %Contact{uri: "sip:new@location.com"}
+        })
+
       callback.({:response, redirect_response})
 
       assert_receive {:redirect, ^redirect_response}
@@ -241,11 +244,13 @@ defmodule Parrot.UacHandlerTest do
   describe "UacHandlerAdapter.create_callback_with_state" do
     test "creates callback with pre-initialized state" do
       handler_state = %{test_pid: self(), pre_initialized: true}
-      callback = UacHandlerAdapter.create_callback_with_state(
-        TestUacHandler,
-        handler_state,
-        dialog_id: "test-dialog"
-      )
+
+      callback =
+        UacHandlerAdapter.create_callback_with_state(
+          TestUacHandler,
+          handler_state,
+          dialog_id: "test-dialog"
+        )
 
       response = create_response(200, "OK")
       callback.({:response, response})
@@ -262,13 +267,17 @@ defmodule Parrot.UacHandlerTest do
   end
 
   defp create_response(status, reason, extra_headers \\ %{}) do
-    headers = Map.merge(%{
-      "to" => "sip:bob@example.com",
-      "from" => "sip:alice@example.com",
-      "call-id" => "test-call-#{System.unique_integer()}",
-      "cseq" => "1 INVITE",
-      "via" => "SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK123"
-    }, extra_headers)
+    headers =
+      Map.merge(
+        %{
+          "to" => "sip:bob@example.com",
+          "from" => "sip:alice@example.com",
+          "call-id" => "test-call-#{System.unique_integer()}",
+          "cseq" => "1 INVITE",
+          "via" => "SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK123"
+        },
+        extra_headers
+      )
 
     %Message{
       type: :response,

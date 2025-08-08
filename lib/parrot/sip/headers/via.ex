@@ -204,11 +204,11 @@ defmodule Parrot.Sip.Headers.Via do
 
   @doc """
   Formats a list of Via headers for SIP message serialization.
-  
+
   Multiple Via headers are formatted on separate lines in SIP messages.
-  
+
   ## Examples
-  
+
       iex> via1 = Parrot.Sip.Headers.Via.new("proxy1.com", :udp, 5060)
       iex> via2 = Parrot.Sip.Headers.Via.new("proxy2.com", :tcp, 5061)
       iex> Parrot.Sip.Headers.Via.format_list([via1, via2])
@@ -220,7 +220,7 @@ defmodule Parrot.Sip.Headers.Via do
     |> Enum.map(&format/1)
     |> Enum.join(", ")
   end
-  
+
   @doc """
   Adds or updates a parameter in a Via header.
 

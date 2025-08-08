@@ -204,7 +204,7 @@ defmodule Parrot.Sip.UacHandlerAdapter do
   defp send_ack(response, extra_headers, body) do
     # Build ACK request based on the 200 OK response
     ack_request = build_ack_request(response, extra_headers, body)
-    
+
     # Allow for test mode where transport isn't started
     if Process.get(:uac_handler_test_mode) do
       send(Process.get(:uac_handler_test_pid), {:ack_sent, ack_request})
@@ -218,24 +218,32 @@ defmodule Parrot.Sip.UacHandlerAdapter do
     to = response.headers["to"]
     from = response.headers["from"]
     call_id = response.headers["call-id"]
-    
+
     # Get Contact from response for Request-URI
-    request_uri = 
+    request_uri =
       case response.headers["contact"] do
-        %Contact{uri: uri} -> uri
-        contacts when is_list(contacts) -> 
+        %Contact{uri: uri} ->
+          uri
+
+        contacts when is_list(contacts) ->
           case List.first(contacts) do
             %Contact{uri: uri} -> uri
             _ -> extract_uri_from_to(to)
           end
-        _ -> extract_uri_from_to(to)
+
+        _ ->
+          extract_uri_from_to(to)
       end
 
     # Build CSeq for ACK
-    cseq = 
+    cseq =
       case response.headers["cseq"] do
-        %CSeq{number: seq} -> "#{seq} ACK"
-        %{"number" => seq} -> "#{seq} ACK"
+        %CSeq{number: seq} ->
+          "#{seq} ACK"
+
+        %{"number" => seq} ->
+          "#{seq} ACK"
+
         cseq_str when is_binary(cseq_str) ->
           [seq | _] = String.split(cseq_str, " ")
           "#{seq} ACK"
@@ -247,15 +255,20 @@ defmodule Parrot.Sip.UacHandlerAdapter do
       "from" => from,
       "call-id" => call_id,
       "cseq" => cseq,
-      "via" => [],  # Will be added by transport
+      # Will be added by transport
+      "via" => [],
       "max-forwards" => "70",
       "content-length" => "#{byte_size(body)}"
     }
 
     # Add content-type if body present
-    headers = 
+    headers =
       if body != "" do
-        Map.put(base_headers, "content-type", Map.get(extra_headers, "content-type", "application/sdp"))
+        Map.put(
+          base_headers,
+          "content-type",
+          Map.get(extra_headers, "content-type", "application/sdp")
+        )
       else
         base_headers
       end
@@ -283,7 +296,11 @@ defmodule Parrot.Sip.UacHandlerAdapter do
   defp extract_uri_from_to(%{uri: uri}), do: uri
   defp extract_uri_from_to(_), do: "sip:unknown@unknown"
 
-  defp notify_call_established(%{handler_module: handler_module, handler_state: handler_state, dialog_id: dialog_id}) do
+  defp notify_call_established(%{
+         handler_module: handler_module,
+         handler_state: handler_state,
+         dialog_id: dialog_id
+       }) do
     if dialog_id do
       case handler_module.handle_call_established(dialog_id, handler_state) do
         {:ok, _new_state} -> :ok
@@ -311,19 +328,20 @@ defmodule Parrot.Sip.UacHandlerAdapter do
       {:ok, redirect_uri} ->
         # Create new request to redirect URI
         original_request = adapter_state.original_request
-        
+
         if original_request do
           # Update request URI
           new_request = %{original_request | request_uri: redirect_uri}
-          
+
           # Create callback for redirect
-          callback = create_callback_with_state(
-            adapter_state.handler_module,
-            new_state,
-            dialog_id: adapter_state.dialog_id,
-            original_request: new_request
-          )
-          
+          callback =
+            create_callback_with_state(
+              adapter_state.handler_module,
+              new_state,
+              dialog_id: adapter_state.dialog_id,
+              original_request: new_request
+            )
+
           # Send redirected request
           UAC.request(new_request, callback)
           {:ok, %{adapter_state | handler_state: new_state}}
@@ -345,18 +363,23 @@ defmodule Parrot.Sip.UacHandlerAdapter do
 
   defp extract_redirect_uri(response) do
     case response.headers["contact"] do
-      %Contact{uri: uri} -> {:ok, uri}
+      %Contact{uri: uri} ->
+        {:ok, uri}
+
       contacts when is_list(contacts) ->
         case List.first(contacts) do
           %Contact{uri: uri} -> {:ok, uri}
           _ -> :error
         end
+
       contact when is_binary(contact) ->
         case Uri.parse(contact) do
           {:ok, uri} -> {:ok, uri}
           _ -> :error
         end
-      _ -> :error
+
+      _ ->
+        :error
     end
   end
 end

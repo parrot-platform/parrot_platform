@@ -41,6 +41,7 @@ Next steps:
 - [ ] Add git push hook check for mix format
 - [ ] Get github actions working / CICD passing
 - [ ] add OPUS support to uas and uac examples and generators
+- [ ] create proper silence generator for scenarios where we need it
 - [ ] better pattern matching in media modules
 - [ ] better pattern matching in examples/generators
 - [ ] implement B2BUA and media "bridge"-ing

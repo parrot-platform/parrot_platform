@@ -7,7 +7,7 @@ defmodule Parrot.Media.AudioDevicesTest do
       # Note: This test will likely fail in CI without PortAudio installed
       # We're testing the fallback behavior
       result = AudioDevices.list_devices()
-      
+
       assert match?({:ok, _}, result) or match?({:error, :device_enumeration_failed}, result)
     end
   end
@@ -17,7 +17,7 @@ defmodule Parrot.Media.AudioDevicesTest do
       # This test covers the case when list_devices returns error
       # In a real test environment, we'd mock the list_devices function
       result = AudioDevices.get_default_input()
-      
+
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
   end
@@ -25,7 +25,7 @@ defmodule Parrot.Media.AudioDevicesTest do
   describe "get_default_output/0" do
     test "returns error when no devices available" do
       result = AudioDevices.get_default_output()
-      
+
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
   end
@@ -50,7 +50,7 @@ defmodule Parrot.Media.AudioDevicesTest do
     test "parses device line correctly" do
       # Testing the private function behavior through the public API
       # This ensures the parsing logic works correctly
-      
+
       # Note: Since parse_device_output is private, we can't test it directly
       # Instead, we'd need to test it through list_devices with mocked output
       assert true

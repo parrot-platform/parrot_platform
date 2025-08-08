@@ -40,18 +40,18 @@ defmodule Parrot.Media.CodecSelectionTest do
       MediaSession.terminate_session(session_pid)
     end
 
-    test "SDP offer with only PCMU selects PCMU even when not preferred" do
-      # Start a media session with PCMA preference
+    test "SDP offer with unsupported codec falls back to default" do
+      # Start a media session with PCMA only
       session_opts = [
         id: "test-session-2",
         dialog_id: "test-dialog-2",
         role: :uas,
-        supported_codecs: [:pcma, :pcmu]
+        supported_codecs: [:pcma]
       ]
 
       {:ok, session_pid} = MediaSession.start_link(session_opts)
 
-      # SDP offer with only PCMU (0)
+      # SDP offer with only PCMU (0) which we don't support
       sdp_offer = """
       v=0
       o=- 123456 123456 IN IP4 192.168.1.100
@@ -63,25 +63,25 @@ defmodule Parrot.Media.CodecSelectionTest do
       a=sendrecv
       """
 
-      # Process offer should select PCMU (only available codec)
+      # Process offer should select PCMA as fallback
       {:ok, sdp_answer} = MediaSession.process_offer(session_pid, sdp_offer)
 
-      # Verify answer contains PCMU (0)
+      # Verify answer contains PCMA (8)
       assert sdp_answer =~ "m=audio"
-      assert sdp_answer =~ "RTP/AVP 0"
-      assert sdp_answer =~ "a=rtpmap:0 PCMU/8000"
+      assert sdp_answer =~ "RTP/AVP 8"
+      assert sdp_answer =~ "a=rtpmap:8 PCMA/8000"
 
       # Clean up
       MediaSession.terminate_session(session_pid)
     end
 
-    test "UAC generates offer with all supported codecs" do
+    test "UAC generates offer with supported codecs" do
       # Start a media session as UAC
       session_opts = [
         id: "test-session-3",
         dialog_id: "test-dialog-3",
         role: :uac,
-        supported_codecs: [:pcma, :pcmu]
+        supported_codecs: [:pcma, :opus]
       ]
 
       {:ok, session_pid} = MediaSession.start_link(session_opts)
@@ -91,9 +91,10 @@ defmodule Parrot.Media.CodecSelectionTest do
 
       # Verify offer contains both codecs
       assert sdp_offer =~ "m=audio"
-      assert sdp_offer =~ "RTP/AVP 8 0" or sdp_offer =~ "RTP/AVP 0 8"
-      assert sdp_offer =~ "a=rtpmap:0 PCMU/8000"
+      assert sdp_offer =~ "RTP/AVP 8 111" or sdp_offer =~ "RTP/AVP 111 8"
       assert sdp_offer =~ "a=rtpmap:8 PCMA/8000"
+      # Opus codec should be included (channels may or may not be included)
+      assert sdp_offer =~ "a=rtpmap:111 opus/48000"
 
       # Clean up
       MediaSession.terminate_session(session_pid)

@@ -4,7 +4,7 @@ defmodule Parrot.MixProject do
   def project do
     [
       app: :parrot_platform,
-      version: "0.0.1-alpha.2",
+      version: "0.0.1-alpha.3",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),

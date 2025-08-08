@@ -434,9 +434,11 @@ defmodule Parrot.Sip.Parser do
           # Many SIP implementations have minor discrepancies
           # Log a warning but don't reject the message
           require Logger
+
           Logger.debug(
             "Content-Length mismatch: declared #{declared_length}, actual #{actual_length}"
           )
+
           :ok
 
         true ->

@@ -293,31 +293,33 @@ defmodule Parrot.Sip.Transport.Udp do
 
   defp handle_message_outcome({:new_response, _via, %Parrot.Sip.Message{} = msg}, state) do
     log(state, :debug, "udp port: recv response: #{msg.status_code} #{msg.reason_phrase}")
-    
+
     # Extract the topmost Via header to route to the correct transaction
-    via = case msg.headers["via"] do
-      [v | _] when is_map(v) -> v
-      v when is_map(v) -> v
-      _ -> nil
-    end
-    
+    via =
+      case msg.headers["via"] do
+        [v | _] when is_map(v) -> v
+        v when is_map(v) -> v
+        _ -> nil
+      end
+
     if via do
       # Route the response to the transaction state machine
       TransactionStatem.client_response(via, Parrot.Sip.Message.to_binary(msg))
     else
       log(state, :warning, "Response has no Via header, cannot route to transaction")
     end
-    
+
     # Also call the handler's transp_response if it exists
     case state.handler do
       %{module: mod, args: args} when not is_nil(mod) ->
         if function_exported?(mod, :transp_response, 2) do
           mod.transp_response(msg, args)
         end
+
       _ ->
         :ok
     end
-    
+
     :ok
   end
 

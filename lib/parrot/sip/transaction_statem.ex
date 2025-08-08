@@ -224,13 +224,17 @@ defmodule Parrot.Sip.TransactionStatem do
           end
 
         # For responses, extract method from CSeq header
-        method = 
+        method =
           case sip_msg.headers["cseq"] do
-            %{method: m} -> m
+            %{method: m} ->
+              m
+
             cseq when is_binary(cseq) ->
               [_, method_str] = String.split(cseq, " ", parts: 2)
               String.trim(method_str) |> String.downcase() |> String.to_atom()
-            _ -> nil
+
+            _ ->
+              nil
           end
 
         trans_id =
@@ -302,11 +306,13 @@ defmodule Parrot.Sip.TransactionStatem do
       state = %{
         type: :client,
         data: %{
-          handler: callback,  # For client, handler is the callback function
+          # For client, handler is the callback function
+          handler: callback,
           origmsg: sip_msg,
           transaction: transaction,
           options: options,
-          outreq: sip_msg,  # Store original request for client
+          # Store original request for client
+          outreq: sip_msg,
           cancelled: false
         },
         timers: %{},
@@ -317,10 +323,10 @@ defmodule Parrot.Sip.TransactionStatem do
       Logger.debug(
         "trans: client: #{method} #{request_uri}; call-id: #{call_id}; branch: #{branch}"
       )
-      
+
       # Send the initial request
       Parrot.Sip.Transport.send_request(sip_msg)
-      
+
       # Start in calling state for client transactions
       {:ok, :calling, state}
     else
@@ -347,7 +353,7 @@ defmodule Parrot.Sip.TransactionStatem do
       Logger.debug(
         "trans: server: #{method} #{request_uri}; call-id: #{call_id}; branch: #{branch}"
       )
-      
+
       {:ok, :trying, state,
        [{:next_event, :cast, {:handle_transaction_setup, [:server, sip_msg, method, handler]}}]}
     end
@@ -695,30 +701,36 @@ defmodule Parrot.Sip.TransactionStatem do
   end
 
   # CALLING STATE
-  def calling(:cast, {:received, %{type: :response} = response}, %{type: :client, data: data} = state) do
-    Logger.debug("Client transaction received response: #{response.status_code} #{response.reason_phrase}")
-    
+  def calling(
+        :cast,
+        {:received, %{type: :response} = response},
+        %{type: :client, data: data} = state
+      ) do
+    Logger.debug(
+      "Client transaction received response: #{response.status_code} #{response.reason_phrase}"
+    )
+
     # Call the user callback with the response
     if is_function(data.handler) do
       data.handler.({:response, response})
     end
-    
+
     # Handle state transitions based on response code
     cond do
       response.status_code >= 100 and response.status_code < 200 ->
         # Provisional response - stay in calling state
         {:keep_state, state}
-        
+
       response.status_code >= 200 and response.status_code < 300 ->
         # Success response - move to completed state
         {:next_state, :completed, state}
-        
+
       response.status_code >= 300 ->
         # Final response - move to completed state
         {:next_state, :completed, state}
     end
   end
-  
+
   def calling(:cast, event, data), do: handle_common_event(event, data)
 
   def calling(event_type, event, state) do
