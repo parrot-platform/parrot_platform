@@ -131,7 +131,8 @@ defmodule Parrot.MixProject do
         "guides/architecture.md": [title: "Architecture"],
         "guides/sip-basics.md": [title: "SIP Basics"],
         "guides/media-handler.md": [title: "MediaHandler Guide"],
-        "guides/state-machines.md": [title: "State Machines"]
+        "guides/state-machines.md": [title: "State Machines"],
+        "guides/presentations.md": [title: "Presentations"]
       ],
 
       # Groups for modules in the sidebar
@@ -170,7 +171,8 @@ defmodule Parrot.MixProject do
           "guides/sip-basics.md",
           "guides/media-handler.md",
           "guides/state-machines.md"
-        ]
+        ],
+        Presentations: ["guides/presentations.md"]
       ],
 
       # Enable Mermaid diagram support
