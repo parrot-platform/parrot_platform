@@ -39,9 +39,11 @@ Get started with the Parrot Platform by follow the instructions at https://hexdo
 
 Next steps:
 - [ ] Add git push hook check for mix format
-- [ ] Get github actions working
+- [ ] Get github actions working / CICD passing
 - [ ] add OPUS support to uas and uac examples and generators
 - [ ] better pattern matching in media modules
+- [ ] better pattern matching in examples/generators
+- [ ] implement B2BUA and media "bridge"-ing
 - [ ] load test
 - [x] create Parrot Platform audio file welcome message for basic sample app generator to use
 - [x] update Parrot.SipHandler to Parrot.UasHandler
