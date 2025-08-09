@@ -428,19 +428,6 @@ defmodule Parrot.Sip.TransactionStatemTest do
     }
   end
 
-  defp create_cancel_request(original_invite) do
-    %{
-      original_invite
-      | method: :cancel,
-        type: :request,
-        direction: :incoming,
-        headers:
-          Map.update!(original_invite.headers, "cseq", fn cseq ->
-            %{cseq | method: :cancel}
-          end)
-    }
-  end
-
   defp create_bye_request_in_dialog do
     %Message{
       type: :request,

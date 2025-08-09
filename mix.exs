@@ -4,7 +4,7 @@ defmodule Parrot.MixProject do
   def project do
     [
       app: :parrot_platform,
-      version: "0.0.1-alpha.2",
+      version: "0.0.1-alpha.3",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -130,7 +130,9 @@ defmodule Parrot.MixProject do
         "guides/overview.md": [title: "Overview"],
         "guides/architecture.md": [title: "Architecture"],
         "guides/sip-basics.md": [title: "SIP Basics"],
-        "guides/media-handler.md": [title: "MediaHandler Guide"]
+        "guides/media-handler.md": [title: "MediaHandler Guide"],
+        "guides/state-machines.md": [title: "State Machines"],
+        "guides/presentations.md": [title: "Presentations"]
       ],
 
       # Groups for modules in the sidebar
@@ -167,8 +169,10 @@ defmodule Parrot.MixProject do
         Guides: [
           "guides/architecture.md",
           "guides/sip-basics.md",
-          "guides/media-handler.md"
-        ]
+          "guides/media-handler.md",
+          "guides/state-machines.md"
+        ],
+        Presentations: ["guides/presentations.md"]
       ],
 
       # Enable Mermaid diagram support
@@ -178,10 +182,11 @@ defmodule Parrot.MixProject do
 
   defp before_closing_body_tag(:html) do
     """
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
-      mermaid.initialize({
-        startOnLoad: true,
+      document.addEventListener("DOMContentLoaded", function() {
+        mermaid.initialize({
+          startOnLoad: false,
         theme: 'neutral',
         themeVariables: {
           // Use neutral colors that work well on both light and dark backgrounds
@@ -239,27 +244,34 @@ defmodule Parrot.MixProject do
           fontFamily: 'Arial, sans-serif',
           fontSize: '14px'
         }
-      });
+        });
 
-      document.addEventListener("DOMContentLoaded", function() {
-        let id = 0;
-        for (const codeEl of document.querySelectorAll("pre code.mermaid, pre code.language-mermaid")) {
-          const preEl = codeEl.parentElement;
-          const graphDefinition = codeEl.textContent;
-          const graphEl = document.createElement("div");
-          const graphId = "mermaid-graph-" + id++;
-          graphEl.classList.add("mermaid-diagram");
+        function renderMermaidDiagrams() {
+          let id = 0;
+          for (const codeEl of document.querySelectorAll("pre code.mermaid, pre code.language-mermaid")) {
+            const preEl = codeEl.parentElement;
+            const graphDefinition = codeEl.textContent;
+            const graphEl = document.createElement("div");
+            const graphId = "mermaid-graph-" + id++;
+            graphEl.classList.add("mermaid-diagram");
 
-          mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
-            graphEl.innerHTML = svg;
-            bindFunctions?.(graphEl);
-            preEl.insertAdjacentElement("afterend", graphEl);
-            preEl.style.display = "none";
-          }).catch(err => {
-            console.error("Mermaid rendering error:", err);
-            preEl.insertAdjacentHTML("afterend", "<p style='color: red;'>Error rendering diagram</p>");
-          });
+            mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
+              graphEl.innerHTML = svg;
+              bindFunctions?.(graphEl);
+              preEl.insertAdjacentElement("afterend", graphEl);
+              preEl.style.display = "none";
+            }).catch(err => {
+              console.error("Mermaid rendering error:", err);
+              preEl.insertAdjacentHTML("afterend", "<p style='color: red;'>Error rendering diagram</p>");
+            });
+          }
         }
+
+        // Initial render
+        renderMermaidDiagrams();
+
+        // Also listen for exdoc:loaded event for hexdocs.pm compatibility
+        window.addEventListener("exdoc:loaded", renderMermaidDiagrams);
       });
     </script>
     <style>

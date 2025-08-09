@@ -97,31 +97,23 @@ sequenceDiagram
 The transaction state machines are implemented according to [RFC 3261 Section 17](https://www.rfc-editor.org/rfc/rfc3261.html#section-17):
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Init: create_transaction
+graph LR
+    subgraph "Client Transaction"
+        CI[Init] --> CA[Calling]
+        CA -->|1xx| CP[Proceeding]
+        CA -->|final| CC[Completed]
+        CP -->|final| CC
+        CC -->|Timer D| CT[Terminated]
+    end
     
-    state "Client Transaction" as client {
-        Init --> Calling: send_request
-        Calling --> Proceeding: rcv_provisional
-        Calling --> Completed: rcv_final_response
-        Proceeding --> Completed: rcv_final_response
-        Completed --> Terminated: timer_D
-    }
-    
-    state "Server Transaction" as server {
-        Init --> Trying: rcv_request
-        Trying --> Proceeding: send_provisional
-        Trying --> Completed: send_final_response
-        Proceeding --> Completed: send_final_response
-        Completed --> Confirmed: rcv_ACK
-        Confirmed --> Terminated: timer_I
-    }
-    
-    Terminated --> [*]
-    
-    note right of Calling: Timer A: Retransmit<br/>Timer B: Timeout
-    note right of Completed: Timer D: Wait time<br/>Timer K: Termination
-    note left of Confirmed: Timer I: ACK wait<br/>Timer H: ACK timeout
+    subgraph "Server Transaction"
+        SI[Init] --> ST[Trying]
+        ST -->|send 1xx| SP[Proceeding]
+        ST -->|send final| SC[Completed]
+        SP -->|send final| SC
+        SC -->|ACK| SCF[Confirmed]
+        SCF -->|Timer I| STM[Terminated]
+    end
 ```
 
 ## State Machine: Dialog Layer

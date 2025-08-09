@@ -195,5 +195,4 @@ defmodule Parrot.Sip.HandlerAdapter.ResponseHandler do
       end
     end)
   end
-
 end

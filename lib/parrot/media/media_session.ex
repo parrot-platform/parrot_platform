@@ -241,15 +241,16 @@ defmodule Parrot.Media.MediaSession do
     audio_file = Keyword.get(opts, :audio_file)
     media_handler = Keyword.get(opts, :media_handler)
     handler_args = Keyword.get(opts, :handler_args, %{})
-    supported_codecs = Keyword.get(opts, :supported_codecs, [:pcma])  # G.711 A-law by default
-    
+    # G.711 A-law by default
+    supported_codecs = Keyword.get(opts, :supported_codecs, [:pcma])
+
     # New audio configuration options
     audio_source = Keyword.get(opts, :audio_source, if(audio_file, do: :file, else: :silence))
     audio_sink = Keyword.get(opts, :audio_sink, :none)
     output_file = Keyword.get(opts, :output_file)
     input_device_id = Keyword.get(opts, :input_device_id)
     output_device_id = Keyword.get(opts, :output_device_id)
-    
+
     # Get pre-allocated RTP port if provided
     local_rtp_port = Keyword.get(opts, :local_rtp_port)
 
@@ -534,7 +535,7 @@ defmodule Parrot.Media.MediaSession do
     {_, _, module} = codec_info(codec)
     module
   end
-  
+
   defp get_pipeline_module_for_config(codec, data) do
     # Use PortAudioPipeline if using device audio
     if data.audio_source == :device || data.audio_sink == :device do
@@ -679,14 +680,18 @@ defmodule Parrot.Media.MediaSession do
             Logger.info("MediaSession #{data.id}: Selected codec: #{inspect(selected_codec)}")
 
             # Use existing local RTP port if already allocated, otherwise allocate new one
-            local_rtp_port = if data.local_rtp_port do
-              Logger.info("MediaSession #{data.id}: Using pre-allocated local RTP port: #{data.local_rtp_port}")
-              data.local_rtp_port
-            else
-              port = allocate_rtp_port()
-              Logger.info("MediaSession #{data.id}: Allocated new local RTP port: #{port}")
-              port
-            end
+            local_rtp_port =
+              if data.local_rtp_port do
+                Logger.info(
+                  "MediaSession #{data.id}: Using pre-allocated local RTP port: #{data.local_rtp_port}"
+                )
+
+                data.local_rtp_port
+              else
+                port = allocate_rtp_port()
+                Logger.info("MediaSession #{data.id}: Allocated new local RTP port: #{port}")
+                port
+              end
 
             # Generate answer SDP with selected codec
             sdp_answer = generate_answer_sdp(local_rtp_port, selected_codec)

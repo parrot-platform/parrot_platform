@@ -5,7 +5,6 @@ defmodule Parrot.Sip.UASTest do
   alias Parrot.Sip.Message
   alias Parrot.Sip.Headers.{Via, From, To, CSeq, Contact}
   alias Parrot.Sip.TestHandler
-  alias Parrot.Sip.Source
 
   require Logger
 

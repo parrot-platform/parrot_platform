@@ -8,7 +8,6 @@ defmodule Parrot.Sip.UAC do
   """
 
   alias Parrot.Sip.{Transaction, Dialog, Message, Branch, Uri}
-  alias Parrot.Sip.Transport.Udp
   alias Parrot.Sip.TransactionStatem
   alias Parrot.Sip.Headers.Via
 
@@ -87,9 +86,9 @@ defmodule Parrot.Sip.UAC do
           message: sip_msg,
           destination: {host, port}
         }
-        
+
         Parrot.Sip.Transport.Udp.send_request(out_req)
-      
+
       {:error, reason} ->
         require Logger
         Logger.error("Failed to extract destination from request URI: #{inspect(reason)}")
@@ -158,13 +157,15 @@ defmodule Parrot.Sip.UAC do
     end
   end
 
-  @spec extract_destination_from_request_uri(String.t()) :: {:ok, String.t(), integer()} | {:error, term()}
+  @spec extract_destination_from_request_uri(String.t()) ::
+          {:ok, String.t(), integer()} | {:error, term()}
   defp extract_destination_from_request_uri(request_uri) do
     case Uri.parse(request_uri) do
       {:ok, %Uri{host: host, port: port}} ->
         # Use default SIP port if not specified
         port = port || 5060
         {:ok, host, port}
+
       error ->
         error
     end

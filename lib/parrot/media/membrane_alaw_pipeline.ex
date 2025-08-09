@@ -10,15 +10,17 @@ defmodule Parrot.Media.MembraneAlawPipeline do
   @impl true
   def handle_init(_ctx, opts) do
     Logger.info("MembraneAlawPipeline: Starting for session #{opts.session_id}")
-    Logger.info("  Audio file: #{opts.audio_file}")
+    Logger.info("  Audio file: #{inspect(opts.audio_file)}")
 
-    # Check if file exists and get its size
-    case File.stat(opts.audio_file) do
-      {:ok, %{size: size}} ->
-        Logger.info("  Audio file size: #{size} bytes")
+    # Check if file exists and get its size (only for actual file paths)
+    if is_binary(opts.audio_file) do
+      case File.stat(opts.audio_file) do
+        {:ok, %{size: size}} ->
+          Logger.info("  Audio file size: #{size} bytes")
 
-      {:error, reason} ->
-        Logger.error("  Cannot stat audio file: #{inspect(reason)}")
+        {:error, reason} ->
+          Logger.error("  Cannot stat audio file: #{inspect(reason)}")
+      end
     end
 
     Logger.info("  RTP destination: #{opts.remote_rtp_address}:#{opts.remote_rtp_port}")
@@ -27,20 +29,28 @@ defmodule Parrot.Media.MembraneAlawPipeline do
     # Generate SSRC once for consistency
     ssrc = :rand.uniform(0xFFFFFFFF)
 
-    # Create bidirectional UDP endpoint first
+    # Create bidirectional UDP endpoint
     udp_endpoint_spec =
-      child(:udp_endpoint, %Membrane.UDP.Endpoint{
-        local_port_no: opts.local_rtp_port,
-        destination_port_no: opts.remote_rtp_port,
-        destination_address:
-          case parse_ip(opts.remote_rtp_address) do
-            {:ok, ip} ->
-              ip
+      if opts.audio_file && opts.audio_file != :default_audio do
+        # Full bidirectional endpoint when we have audio to send
+        child(:udp_endpoint, %Membrane.UDP.Endpoint{
+          local_port_no: opts.local_rtp_port,
+          destination_port_no: opts.remote_rtp_port,
+          destination_address:
+            case parse_ip(opts.remote_rtp_address) do
+              {:ok, ip} ->
+                ip
 
-            {:error, reason} ->
-              raise "Invalid remote RTP address: #{inspect(opts.remote_rtp_address)}, reason: #{inspect(reason)}"
-          end
-      })
+              {:error, reason} ->
+                raise "Invalid remote RTP address: #{inspect(opts.remote_rtp_address)}, reason: #{inspect(reason)}"
+            end
+        })
+      else
+        # Receive-only endpoint when no audio to send
+        child(:udp_endpoint, %Membrane.UDP.Source{
+          local_port_no: opts.local_rtp_port
+        })
+      end
 
     # Create RTP SessionBin for bidirectional RTP handling
     rtp_session_spec =
@@ -56,53 +66,58 @@ defmodule Parrot.Media.MembraneAlawPipeline do
       |> get_child(:rtp)
     ]
 
-    # Sending pipeline children
-    send_children_spec = [
-      # Source - read WAV file
-      child(:file_source, %Membrane.File.Source{
-        location: opts.audio_file
-      }),
-
-      # Parse WAV file
-      child(:wav_parser, Membrane.WAV.Parser),
-
-      # Convert to G.711 A-law
-      child(:g711_encoder, Membrane.G711.Encoder),
-
-      # Chunk G.711 data into RTP-sized packets
-      child(:g711_chunker, %Parrot.Media.G711Chunker{
-        # 20ms packets
-        chunk_duration: 20
-      }),
-
-      # Add realtimer to pace the audio
-      child(:realtimer, Membrane.Realtimer),
-
-      # RTP packet logger
-      child(:rtp_debug, %Parrot.Media.RTPPacketLogger{
-        dest_info:
-          case parse_ip(opts.remote_rtp_address) do
-            {:ok, ip} -> "#{format_ip(ip)}:#{opts.remote_rtp_port}"
-            {:error, _} -> "invalid_ip:#{opts.remote_rtp_port}"
-          end
-      })
-    ]
+    # Create sending pipeline components
+    send_children_spec =
+      if opts.audio_file && opts.audio_file != :default_audio do
+        [
+          # Source - read WAV file
+          child(:file_source, %Membrane.File.Source{
+            location: opts.audio_file
+          }),
+          # Parse WAV file
+          child(:wav_parser, Membrane.WAV.Parser),
+          # Convert to G.711 A-law
+          child(:g711_encoder, Membrane.G711.Encoder),
+          # Chunk G.711 data into RTP-sized packets
+          child(:g711_chunker, %Parrot.Media.G711Chunker{
+            # 20ms packets
+            chunk_duration: 20
+          }),
+          # Add realtimer to pace the audio
+          child(:realtimer, Membrane.Realtimer),
+          # RTP packet logger
+          child(:rtp_debug, %Parrot.Media.RTPPacketLogger{
+            dest_info:
+              case parse_ip(opts.remote_rtp_address) do
+                {:ok, ip} -> "#{format_ip(ip)}:#{opts.remote_rtp_port}"
+                {:error, _} -> "invalid_ip:#{opts.remote_rtp_port}"
+              end
+          })
+        ]
+      else
+        []
+      end
 
     # Sending pipeline links
-    send_links_spec = [
-      get_child(:file_source)
-      |> get_child(:wav_parser)
-      |> get_child(:g711_encoder)
-      |> get_child(:g711_chunker)
-      |> get_child(:realtimer)
-      |> via_in(Pad.ref(:input, ssrc),
-        options: [payloader: Membrane.RTP.G711.Payloader]
-      )
-      |> get_child(:rtp)
-      |> via_out(Pad.ref(:rtp_output, ssrc), options: [encoding: :PCMA])
-      |> get_child(:rtp_debug)
-      |> get_child(:udp_endpoint)
-    ]
+    send_links_spec =
+      if opts.audio_file && opts.audio_file != :default_audio do
+        [
+          get_child(:file_source)
+          |> get_child(:wav_parser)
+          |> get_child(:g711_encoder)
+          |> get_child(:g711_chunker)
+          |> get_child(:realtimer)
+          |> via_in(Pad.ref(:input, ssrc),
+            options: [payloader: Membrane.RTP.G711.Payloader]
+          )
+          |> get_child(:rtp)
+          |> via_out(Pad.ref(:rtp_output, ssrc), options: [encoding: :PCMA])
+          |> get_child(:rtp_debug)
+          |> get_child(:udp_endpoint)
+        ]
+      else
+        []
+      end
 
     structure =
       [udp_endpoint_spec, rtp_session_spec] ++

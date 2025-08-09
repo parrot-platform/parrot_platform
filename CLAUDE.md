@@ -8,12 +8,24 @@ Parrot Platform provides Elixir libraries and OTP behaviours for building teleco
 
 ## Current Development Priority
 
-**PRIMARY GOAL**: Make all SIPp tests pass using only the pure Elixir SIP implementation (not ersip). Focus on:
-1. Getting SIP transactions working correctly
-2. Proper dialog handling
-3. Passing all SIPp integration tests
-
-**FUTURE GOAL**: Connect audio streams using Elixir Membrane (but not yet - SIP protocol must work first).
+1. Add B2BUA state machine and handler capabilities
+2. Adding more complex sipp scenario
+     - retransmissions
+     - re-invites
+     - hold/unhold
+     - UPDATE message to modify media mid-call
+3. Add TCP and TLS transport support
+4. Add registration client and server capabilities with authentication
+     - Add sipp scenarios for testing
+          - Basic REGISTER / 200 OK
+          - REGISTER with authentication (401 Unauthorized challenge)
+          - REGISTER with expiry 0 (unregister)
+          - Multiple contacts in a single REGISTER
+    - server registrar should make the storage of the registration handled by the user handlers so that the user can decide how they will store the registered contacts and look them up later to send messages
+5. Authentication & Security
+     - INVITE with Digest Authentication (401 / 407 challenge + re-INVITE)
+     - Wrong password (should reject)
+     - OPTIONS with authentication
 
 ## Coding Style Principles
 
@@ -71,6 +83,8 @@ This approach:
    - Descriptive in their naming
    - Testing behavior, not implementation details
    - Properly isolated with appropriate setup/teardown
+6. sipp scenario functional testing
+   - when new features are added, new sipp scenarios should be added to the sipp functional test sweet as well
 
 ## Common Development Commands
 

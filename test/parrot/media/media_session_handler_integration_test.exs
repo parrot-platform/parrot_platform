@@ -138,7 +138,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
           role: :uas,
           media_handler: IntegrationTestHandler,
           handler_args: %{test_pid: self()},
-          supported_codecs: [:opus, :pcmu, :pcma]
+          supported_codecs: [:opus, :pcma],
+          audio_file: Path.join(:code.priv_dir(:parrot_platform), "audio/parrot-welcome.wav")
         )
 
       # Create a simple SDP offer
@@ -161,9 +162,11 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
       # Verify callbacks were invoked
       assert_receive {:callback, :offer, {_sdp, :inbound}}, 1000
       assert_receive {:callback, :codec_negotiation, {offered, supported}}, 1000
-      assert :pcmu in offered
+      # We receive PCMU in the offer but don't support it
       assert :pcma in offered
+      assert :opus in offered
       assert :opus in supported
+      assert :pcma in supported
 
       MediaSession.terminate_session(session)
     end
@@ -187,8 +190,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
       s=Test
       c=IN IP4 127.0.0.1
       t=0 0
-      m=audio 5004 RTP/AVP 0
-      a=rtpmap:0 PCMU/8000
+      m=audio 5004 RTP/AVP 8
+      a=rtpmap:8 PCMA/8000
       """
 
       {:ok, _answer} = MediaSession.process_offer(session, sdp_offer)
@@ -232,7 +235,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
           role: :uas,
           media_handler: IntegrationTestHandler,
           handler_args: %{test_pid: self()},
-          supported_codecs: [:opus, :pcmu, :pcma]
+          supported_codecs: [:opus, :pcma],
+          audio_file: Path.join(:code.priv_dir(:parrot_platform), "audio/parrot-welcome.wav")
         )
 
       # Offer with multiple codecs including opus
@@ -270,8 +274,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
           role: :uas,
           media_handler: IntegrationTestHandler,
           handler_args: %{test_pid: self(), play_welcome: true},
-          # Don't play default audio
-          audio_file: nil
+          # Provide audio file for pipeline
+          audio_file: Path.join(:code.priv_dir(:parrot_platform), "audio/parrot-welcome.wav")
         )
 
       # Setup media session
@@ -281,8 +285,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
       s=Test
       c=IN IP4 127.0.0.1
       t=0 0
-      m=audio 5004 RTP/AVP 0
-      a=rtpmap:0 PCMU/8000
+      m=audio 5004 RTP/AVP 8
+      a=rtpmap:8 PCMA/8000
       """
 
       {:ok, _answer} = MediaSession.process_offer(session, sdp_offer)
@@ -307,7 +311,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
         MediaSession.start_link(
           id: session_id,
           dialog_id: "dialog_1",
-          role: :uas
+          role: :uas,
+          audio_file: Path.join(:code.priv_dir(:parrot_platform), "audio/parrot-welcome.wav")
         )
 
       # Should work normally
@@ -322,7 +327,8 @@ defmodule Parrot.Media.MediaSessionHandlerIntegrationTest do
       """
 
       {:ok, answer} = MediaSession.process_offer(session, sdp_offer)
-      assert answer =~ "PCMU"
+      # We don't support PCMU, so should answer with PCMA
+      assert answer =~ "PCMA"
 
       :ok = MediaSession.start_media(session)
 

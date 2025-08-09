@@ -1378,7 +1378,7 @@ defmodule Parrot.Sip.Transaction do
   end
 
   # Fallback for any other state/event
-  def handle_event(event, transaction) do
+  def handle_event(_event, transaction) do
     Logger.debug("[handle_event] (fallback) Any state. Transaction: #{inspect(transaction)}")
     {transaction, [:ignore]}
   end

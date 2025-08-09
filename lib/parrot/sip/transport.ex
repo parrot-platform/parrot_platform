@@ -326,15 +326,15 @@ defmodule Parrot.Sip.Transport do
           destination: {host, port},
           message: request
         }
-        
+
         Parrot.Sip.Transport.Udp.send_request(out_req)
-        
+
       {:error, reason} ->
         Logger.error("Failed to extract destination from request: #{inspect(reason)}")
         {:error, reason}
     end
   end
-  
+
   # Extract host and port from a SIP message's request URI
   defp extract_destination(%Message{request_uri: uri}) when is_binary(uri) do
     case Parrot.Sip.Uri.parse(uri) do
@@ -342,21 +342,21 @@ defmodule Parrot.Sip.Transport do
         # Default SIP port is 5060
         port = port || 5060
         {:ok, {host, port}}
-        
+
       {:ok, %{host: host}} when is_binary(host) ->
         # No port specified, use default
         {:ok, {host, 5060}}
-        
+
       {:error, reason} ->
         {:error, reason}
-        
+
       _ ->
         {:error, :invalid_uri}
     end
   rescue
     _ -> {:error, :uri_parse_error}
   end
-  
+
   defp extract_destination(_), do: {:error, :no_request_uri}
 
   # Private helper functions

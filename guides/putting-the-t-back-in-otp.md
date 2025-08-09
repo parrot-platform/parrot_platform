@@ -9,44 +9,38 @@ backgroundColor: #fff
 
 # Putting the "T" back in OTP
 
-## Building Modern Telecom with Elixir
+## Can we build telecoms with the Erlang Runtime again?
 
 **2025 ClueCon**
+
+---
+
+# Here is the plan...
+
+- Learn about Erlang, Elixir, and the BEAM
+- Explore why Elixir is well-suited for modern VoIP systems
+- See what an Elixir VoIP development stack could look like 
+- Do a demo (*hopefully not too dangerous*)
+
+## How does that sound?
 
 ---
 
 # Who Am I?
 
 - Started in VoIP and will die in VoIP...jk (maybe)
-- This year marks **10 years** since my first ClueCon
-- Live and surf in Oceanside, CA
+- Living and surfing in Oceanside, CA
 - Wife and 4 kids 
 
 ---
 
-# What Does VoIP Development Look Like?
-
-## The Reality Check 
-
-> It is not for the faint of heart
-
-- **Configuration files** 📄
-
-- **SIP protocol knowledge is mixed with DSLs**
-
-- **Scaling challenges**
-  - Adding services to handle load (redis, rabbitmq, NATs, etc.)
-  - Complex distributed systems
-  - State management across nodes
+# One more language will fix me...
 
 ---
 
-**The Good News**: It can be a lot of fun 
-
-**The Problem**: Important logic trapped in different static files, hard to test, harder to extend
+# mod_erlang_event
 
 ---
-
 # What is Erlang/Elixir/OTP?
 
 ## Erlang (1986)
@@ -57,6 +51,8 @@ backgroundColor: #fff
   - **Hot code swapping** - Zero downtime updates
   - **Distribution** - Built-in clustering
 
+--- 
+
 ```erlang
 -module(hello).
 -export([greet/1]).
@@ -64,8 +60,28 @@ backgroundColor: #fff
 greet(Name) ->
     io:format("Hello, ~s!~n", [Name]).
 ```
+
+---
+
+# Elixir (2011)
+- Created by José Valim to modernize Erlang/BEAM development
+- Brings to Erlang/BEAM:
+  - **Friendly syntax** - Ruby-inspired, readable and expressive
+  - **Powerful metaprogramming** - Macros for DSLs and code generation
+  - **Mix tool** - Project management, testing, and builds
+  - **Phoenix & Nerves** - Robust web and embedded ecosystems
+  - **Nx & Bumblebee** - New ML/AI libraries (like Pytorch for Elixir)
+
+---
+
+```elixir
+defmodule Hello do
+  def greet(name) do
+    IO.puts("Hello, #{name}!")
+  end
+end
 ```
-```
+
 ---
 
 # OTP - Open Telecom Platform
@@ -75,70 +91,98 @@ greet(Name) ->
 - Framework for building distributed, fault-tolerant applications
 - Supervision trees for self-healing systems
 - gen_server, gen_statem behaviors
-- Built by for telecom (see: Erlang: The Movie)
+- Built by and for telecom (see: Erlang: The Movie)
 
 ---
 
-# Enter Elixir (2011)
+# Concurrency and Distribution Solved Together
 
-## Modern Language, Built on the Erlang VM (BEAM - Bogdan's Erlang Abstract Machine)
+```bash
+$ iex --sname foo
 
-- **Ruby-like syntax** on the Erlang VM
-- **Metaprogramming** capabilities
-- **Pipe operator** for data transformation
-- All the power of OTP with modern tooling
+iex(foo@host)1> pid = spawn(fn ->
+...(1)>   receive do
+...(1)>     {:ping, from} -> send(from, {:pong, node()})
+...(1)>   end
+...(1)> end)
+#PID<0.108.0>
 
+iex(foo@host)2> :global.register_name(:my_proc, pid)
+:yes
+```
+
+---
+
+# Concurrency and Distribution Solved Together
+
+```bash
+# iex --sname bar
+
+iex(bar@host)1> Node.connect(:'foo@host')
+true
+
+iex(bar@host)2> send(:global.whereis_name(:my_proc), {:ping, self()})
+{:ping, #PID<0.90.0>}
+
+iex(bar@host)3> receive do
+...(3)>   msg -> msg
+...(3)> after
+...(3)>   1000 -> :timeout
+...(3)> end
+{:pong, :"foo@host"}
+```
+
+---
+
+# Concurrency and Distribution Solved Together
+
+- **The Good**: Whole blocks of problems already solved
+- **The Bad**: Can feel like you're bringing a cannon to a gun fight
+
+---
+
+## gen_statem
+
+**gen_statem** is Erlang's state machine behavior that provides:
+- State-specific event handling
+- Automatic state transitions
+- Built-in timers and timeouts
+
+---
+
+# Example flow:
+
+```
+Trying → Proceeding → Completed → Confirmed → Terminated
+```
+
+Example code
 ```elixir
-defmodule Hello do
-  @moduledoc """
-  A simple greeter module.
-  """
+def trying(:cast, {:response, %{status: status}}, data) when status < 200 do
+  # Probably a 180 or 183
+  {:next_state, :proceeding, data}
+end
 
-  @doc """
-  Greets the given name.
-
-  ## Examples
-
-      iex> Hello.greet("Brandon")
-      "Hello, Brandon!"
-
-  """
-  def greet(name) when is_binary(name) do
-    "Hello, #{name}!"
-  end
+def trying(:cast, {:response, %{status: status}}, data) when status >= 200 do
+  {:next_state, :completed, data}
 end
 ```
 
 ---
 
-# Why the BEAM for VoIP?
+## gen_statem
 
-## It Was Literally Built For This
-
-- **Process isolation**: Each transaction, dialog, or media session can run in its own process state machine
-- **Supervisors**: Automatic restart strategies
-- **gen_server/gen_statem**: Perfect for SIP state machines
-- **Pattern matching**: Ideal for protocol parsing and avoiding huge conditionals
-- **Distribution**: Built-in node clustering
-
-**Yet modern SIP stacks in BEAM are scarce!** 🤔
-
-Shoutout: https://github.com/poroh/ersip
+- **The Good**: Able to handle complex state machines very deterministically
+- **The Bad**: Takes getting used to, especially for troubleshooting
 
 ---
 
-# Real-World Advantages
+# So, that's OTP...
 
-- **Hot code reloading** - Update routing without dropping calls
-- **Distributed systems** - Scale across nodes seamlessly  
-- **Observability** - Built-in tracing with OTP
-- **Pattern matching** - Express routing logic clearly
+## But, what about Elixir?
 
 ---
-
-# Benefits of This Approach
-
-## Why Elixir Shines
+# Why Elixir Shines
 
 1. **Composability**
    ```elixir
@@ -163,38 +207,49 @@ mix dialplan.visualize    # See call flows
 
 ---
 
-# The Missing Pieces
+# Why the Erlang Runtime for VoIP?
 
-## 1. Pure Elixir SIP Stack
+## It Was Literally Built For This
+
+- **Process isolation**: Each transaction, dialog, or media session can run in its own process state machine
+- **Supervisors**: Automatic restart strategies
+- **gen_statem**: Perfect for SIP state machines
+- **Pattern matching**: Ideal for protocol parsing and avoiding huge conditionals
+- **Distribution and Concurrency**: Solved in the same swing
+
+---
+
+# What we need
+
+## Pure Elixir SIP Stack
 - No NIFs or ports to C libraries
 - Pattern matching for message parsing
 - gen_statem for transaction/dialog state machines
 
-## 2. Media Handling
-- RTP/RTCP processing
-- Codec transcoding
-- Media mixing
-
-## 3. Developer-Friendly APIs
-- Elixir-idiomatic interfaces
-- Composable handlers
+_this part I thought I could figure out_
 
 ---
 
-# The Missing Pieces
+# What we also need
 
-## But, what about media!?
+## Pure Elixir Media Stack
+
+_this part I knew I could NOT figure out_
 
 ---
 
-# What is Membrane?
+# Membrane
 
-## The Media Framework We've Been Waiting For
+https://membrane.stream
 
-- **Pure Elixir multimedia framework**
+> built by Software Mansion
+
+- Elixir multimedia framework
 - Pipeline-based architecture
 - Extensive codec support
 - Real-time media processing
+
+---
 
 ```elixir
 defmodule AudioPipeline do
@@ -219,8 +274,6 @@ end
 
 # Membrane + SIP = 🚀
 
-## Building a Media Softswitch
-
 With Membrane, we can:
 - **Handle RTP streams** natively in Elixir
 - **Transcode** between codecs on the fly
@@ -228,27 +281,26 @@ With Membrane, we can:
 - **Record** calls with ease
 - **Integrate** with AI/ML services
 
-All without leaving the BEAM!
+All without leaving the the Erlang Runtime!
 
 ---
 
 # What Would a VoIP Framework Look Like?
 
-## Dream Developer Experience
+---
 
 ```elixir
 defmodule MyVoIPApp do
   use VoIP.Framework
   
-  # Pattern match on SIP methods
   handle_invite %{from: "sip:alice@" <> _domain} = invite do
     invite
     |> accept_call()
     |> play_media("welcome.mp3")
     |> bridge_to("sip:support@company.com")
+    |> fork_media("wss://ai-service.com", %{customer_name: "alice"})
   end
   
-  # Pattern match on specific conditions
   handle_invite %{to: "sip:conference@" <> _} = invite do
     invite
     |> accept_call()
@@ -259,80 +311,110 @@ end
 
 ---
 
-# SIP-Specific Callbacks
+# What is currently possible...
 
-## Making the Complex Simple
+---
+
+#### SIP Callbacks
 
 ```elixir
-defmodule CallHandler do
-  use VoIP.Handler
-  
-  # Lifecycle callbacks
-  def on_call_start(call), do: {:ok, call}
-  def on_call_answer(call), do: {:ok, call}
-  def on_call_end(call, reason), do: :ok
-  
-  # SIP events
-  def on_reinvite(call, sdp), do: handle_reinvite(call, sdp)
-  def on_dtmf(call, digit), do: handle_dtmf(call, digit)
-  
-  # Media events  
-  def on_media_timeout(call), do: hangup(call)
-  def on_silence_detected(call, duration), do: {:ok, call}
-end
+  defmodule MyCallHandler do
+    use Parrot.UasHandler  # For receiving calls (User Agent Server)
+
+    def handle_transaction_invite_trying(_request, _transaction, _state) do
+      Logger.info("[VoipServer] INVITE transaction: trying")
+      :noreply
+    end
+
+    def handle_transaction_invite_proceeding(request, _transaction, state) do
+      Logger.info("[VoipServer] INVITE transaction: proceeding")
+      :noreply
+    end
+    
+    # SIP Protocol Callbacks
+    def handle_invite(request, state) do
+      # Process incoming call
+      {:ok, sdp_answer} = MediaSession.process_offer(request.body)
+      {:respond, 200, "OK", %{}, sdp_answer}
+    end
+
+    def handle_ack(request, state) do
+      # Now you'll want to start media session
+    end
+
+    def handle_bye(request, state) do
+      # Call termination
+      {:respond, response(200, "OK"), state}
+    end
+
+    def handle_cancel(request, state) do
+      # Cancel pending INVITE
+      {:respond, response(200, "OK"), state}
+    end
+
+    def handle_option(request, state) do
+      {:response, 200, "OK", %{}, ""}
+    end
+
+    def handle_info(request, state) do
+      # In-dialog INFO (DTMF, etc)
+      {:respond, response(200, "OK"), state}
+    end
+  end
 ```
 
 ---
 
-# Metaprogramming DSL Router
-
-## Dialplan Meets Elixir
+#### Media Callbacks
 
 ```elixir
-defmodule MyDialplan do
-  use VoIP.Router
-  
-  # DSL for routing
-  route "1XXX" do
-    authenticate()
-    |> set_caller_id("+1555123XXXX")
-    |> dial("sip:provider.com")
+defmodule MyMediaHandler do
+  use Parrot.MediaHandler
+
+  # Core lifecycle callbacks
+  def handle_session_start(session_id, _opts, state) do
+    {:ok, Map.put(state, :session_id, session_id)}
   end
-  
-  route ~r/^011(\d+)$/, to: :international_handler
-  
-  route "911", priority: :emergency do
-    set_location_header()
-    |> dial("sip:emergency@psap.gov", timeout: :infinity)
+
+  def handle_stream_start(session_id, _direction, state) do
+    # Start playing welcome message
+    {{:play, "welcome.wav"}, %{state | playing: :welcome}}
   end
-  
-  # Pattern matching on number patterns
-  route number when number =~ ~r/^\+1/ do
-    process_domestic_call(number)
+
+  # SDP negotiation
+  def handle_codec_negotiation(offered, supported, state) do
+    # Select best codec (prefer opus > pcmu > pcma)
+    codec = Enum.find([:opus, :pcmu, :pcma], & &1 in offered and &1 in supported)
+    {:ok, codec, state}
+  end
+
+  # Playback control
+  def handle_play_complete("welcome.wav", state) do
+    # Play next file or stop
+    {{:play, "menu.wav"}, %{state | playing: :menu}}
+  end
+
+  def handle_play_complete("menu.wav", state) do
+    {:stop, %{state | playing: :done}}
   end
 end
 ```
 
 ---
-
-# The Vision - Core Components
-
-- ✅ Pure Elixir SIP stack with gen_statem
-- ✅ Media handling via Membrane
-- ✅ DSL for routing and dialplans
-- ✅ WebRTC support
-- ✅ Clustering and distribution
-
-But, is any of this even within grasp?
-
----
-
-<!-- _class: lead -->
 
 # Demo Time! 🎉
 
+https://github.com/parrot-platform/parrot_platform
+
 ---
 
+# What's the status of parrot_platform?
+
+- it's very new
+- the ergonomics still need work
+- but, it's been a lot of fun so far
+
+---
 # Questions?
 
 

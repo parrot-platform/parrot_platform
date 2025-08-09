@@ -32,20 +32,23 @@ defmodule Parrot.Media.AudioDevices do
   NOTE: The current version of membrane_portaudio_plugin doesn't provide
   programmatic access to device enumeration. Use `print_devices/0` to 
   see available devices in the console.
-  
+
   Returns a stub response for compatibility.
   """
   @spec list_devices() :: {:ok, [device_info()]} | {:error, term()}
   def list_devices do
     # Current membrane_portaudio_plugin only has print_devices() which outputs to stdout
     # For now, return empty list to avoid crashes
-    Logger.warning("Device enumeration not available. Use Membrane.PortAudio.print_devices() to see devices.")
+    Logger.warning(
+      "Device enumeration not available. Use Membrane.PortAudio.print_devices() to see devices."
+    )
+
     {:ok, []}
   end
-  
+
   @doc """
   Prints available audio devices to console.
-  
+
   This calls Membrane.PortAudio.print_devices() which outputs device
   information to stdout.
   """
@@ -116,30 +119,30 @@ defmodule Parrot.Media.AudioDevices do
       {:error, :device_id_out_of_range}
     end
   end
-  
+
   def validate_device(_device_id, _expected_type) do
     {:error, :invalid_device_id}
   end
 
   @doc """
   Gets device information by ID.
-  
+
   Since device enumeration is not available, this returns a stub response.
   Use `print_devices/0` to see actual device information.
   """
   @spec get_device_info(non_neg_integer()) :: {:ok, device_info()} | {:error, term()}
   def get_device_info(device_id) when is_integer(device_id) and device_id >= 0 do
     # Return stub info since we can't enumerate
-    {:ok, %{
-      id: device_id,
-      name: "Device #{device_id}",
-      type: if(device_id < 2, do: :input, else: :output),
-      channels: 2
-    }}
+    {:ok,
+     %{
+       id: device_id,
+       name: "Device #{device_id}",
+       type: if(device_id < 2, do: :input, else: :output),
+       channels: 2
+     }}
   end
-  
+
   def get_device_info(_device_id) do
     {:error, :invalid_device_id}
   end
 end
-

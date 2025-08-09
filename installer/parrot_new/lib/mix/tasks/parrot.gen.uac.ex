@@ -156,7 +156,7 @@ defmodule Mix.Tasks.Parrot.Gen.Uac do
 
       defp deps do
         [
-          {:parrot_platform, "~> 0.0.1-alpha.2"}
+          {:parrot_platform, "~> 0.0.1-alpha.3"}
         ]
       end
     end

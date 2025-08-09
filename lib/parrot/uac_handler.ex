@@ -505,38 +505,56 @@ defmodule Parrot.UacHandler do
 
       @impl true
       def handle_provisional(response, state) do
-        Logger.debug("UAC received provisional response: \#{response.status_code} \#{response.reason_phrase}")
+        Logger.debug(
+          "UAC received provisional response: \#{response.status_code} \#{response.reason_phrase}"
+        )
+
         {:ok, state}
       end
 
       @impl true
       def handle_success(response, state) do
-        Logger.info("UAC received success response: \#{response.status_code} \#{response.reason_phrase}")
+        Logger.info(
+          "UAC received success response: \#{response.status_code} \#{response.reason_phrase}"
+        )
+
         {:ok, state}
       end
 
       @impl true
       def handle_redirect(response, state) do
-        Logger.info("UAC received redirect response: \#{response.status_code} \#{response.reason_phrase}")
+        Logger.info(
+          "UAC received redirect response: \#{response.status_code} \#{response.reason_phrase}"
+        )
+
         # By default, don't follow redirects automatically
         {:ok, state}
       end
 
       @impl true
       def handle_client_error(response, state) do
-        Logger.warning("UAC received client error: \#{response.status_code} \#{response.reason_phrase}")
+        Logger.warning(
+          "UAC received client error: \#{response.status_code} \#{response.reason_phrase}"
+        )
+
         {:ok, state}
       end
 
       @impl true
       def handle_server_error(response, state) do
-        Logger.error("UAC received server error: \#{response.status_code} \#{response.reason_phrase}")
+        Logger.error(
+          "UAC received server error: \#{response.status_code} \#{response.reason_phrase}"
+        )
+
         {:ok, state}
       end
 
       @impl true
       def handle_global_failure(response, state) do
-        Logger.error("UAC received global failure: \#{response.status_code} \#{response.reason_phrase}")
+        Logger.error(
+          "UAC received global failure: \#{response.status_code} \#{response.reason_phrase}"
+        )
+
         {:ok, state}
       end
 

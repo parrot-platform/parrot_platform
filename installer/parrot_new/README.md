@@ -15,7 +15,7 @@ Or from GitHub before Hex publication:
 git clone https://github.com/parrot-platform/parrot_platform.git
 cd parrot/installer/parrot_new
 mix archive.build
-mix archive.install ./parrot_new-0.0.1-alpha.2.ez
+mix archive.install ./parrot_new-0.0.1-alpha.3.ez
 ```
 
 ## Usage

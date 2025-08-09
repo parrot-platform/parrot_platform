@@ -31,3 +31,5 @@ test/sipp/logs/*
 installer/parrot_new/_build/
 
 *.log
+
+.DS_Store

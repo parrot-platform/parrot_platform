@@ -534,7 +534,7 @@ defmodule Parrot.Sip.Message do
     # Via headers must appear before all other headers
     # Then: Route, Record-Route, Proxy-Require, Max-Forwards, 
     # Proxy-Authorization, To, From, Contact, etc.
-    
+
     # Define header order priority (lower number = higher priority)
     header_order = %{
       "via" => 1,
@@ -552,10 +552,10 @@ defmodule Parrot.Sip.Message do
       "content-type" => 13,
       "content-length" => 14
     }
-    
+
     # Default priority for headers not in the list
     default_priority = 100
-    
+
     headers
     |> Enum.sort_by(fn {name, _value} ->
       normalized_name = name |> to_string() |> String.downcase()
@@ -584,12 +584,13 @@ defmodule Parrot.Sip.Message do
     if Enum.all?(value, &(is_struct(&1) && function_exported?(&1.__struct__, :format, 1))) do
       # Check if the module has a format_list function
       first_struct = List.first(value)
+
       if first_struct && function_exported?(first_struct.__struct__, :format_list, 1) do
         first_struct.__struct__.format_list(value)
       else
         # Default: format each and join with comma
         value
-        |> Enum.map(&(&1.__struct__.format(&1)))
+        |> Enum.map(& &1.__struct__.format(&1))
         |> Enum.join(", ")
       end
     else
