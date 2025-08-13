@@ -454,22 +454,23 @@ defmodule Mix.Tasks.Parrot.Gen.Uas do
         Logger.info("  Offered: \#{inspect(offered_codecs)}")
         Logger.info("  Supported: \#{inspect(supported_codecs)}")
         
-        # Prefer opus, then pcmu, then pcma
-        codec = cond do
-          :opus in offered_codecs and :opus in supported_codecs -> :opus
-          :pcmu in offered_codecs and :pcmu in supported_codecs -> :pcmu
-          :pcma in offered_codecs and :pcma in supported_codecs -> :pcma
-          true -> 
-            Enum.find(offered_codecs, fn c -> c in supported_codecs end)
-        end
+        codec = select_best_codec(offered_codecs, supported_codecs)
         
-        if codec do
-          Logger.info("  Selected codec: \#{codec}")
-          {:ok, codec, state}
-        else
-          Logger.error("  No common codec found!")
-          {:error, :no_common_codec, state}
+        case codec do
+          nil ->
+            Logger.error("  No common codec found!")
+            {:error, :no_common_codec, state}
+          _ ->
+            Logger.info("  Selected codec: \#{codec}")
+            {:ok, codec, state}
         end
+      end
+      
+      defp select_best_codec(offered, supported) do
+        # Codec preference order
+        [:opus, :pcmu, :pcma]
+        |> Enum.find(&(&1 in offered and &1 in supported))
+        |> Kernel.||(Enum.find(offered, &(&1 in supported)))
       end
       
       @impl Parrot.MediaHandler
@@ -505,47 +506,54 @@ defmodule Mix.Tasks.Parrot.Gen.Uas do
       end
       
       @impl Parrot.MediaHandler
+      def handle_play_complete(file_path, %{current_state: :welcome} = state) do
+        Logger.info("[<%= @module %> MediaHandler] Playback completed: \#{file_path}")
+        handle_welcome_complete(state)
+      end
+      
+      def handle_play_complete(file_path, %{current_state: :menu} = state) do
+        Logger.info("[<%= @module %> MediaHandler] Playback completed: \#{file_path}")
+        Logger.info("  Menu completed, stopping playback")
+        {:stop, %{state | current_state: :done}}
+      end
+      
       def handle_play_complete(file_path, state) do
         Logger.info("[<%= @module %> MediaHandler] Playback completed: \#{file_path}")
-        
-        case state.current_state do
-          :welcome ->
-            # After welcome, play menu if available
-            cond do
-              state.menu_file && File.exists?(state.menu_file) ->
-                Logger.info("  Playing menu file: \#{state.menu_file}")
-                {{:play, state.menu_file}, %{state | current_state: :menu}}
-              true ->
-                Logger.info("  No menu file, stopping playback")
-                {:stop, %{state | current_state: :done}}
-            end
-            
-          :menu ->
-            Logger.info("  Menu completed, stopping playback")
-            {:stop, %{state | current_state: :done}}
-            
-          _ ->
-            {:stop, state}
+        {:stop, state}
+      end
+      
+      defp handle_welcome_complete(%{menu_file: nil} = state) do
+        Logger.info("  No menu file, stopping playback")
+        {:stop, %{state | current_state: :done}}
+      end
+      
+      defp handle_welcome_complete(%{menu_file: menu_file} = state) do
+        if File.exists?(menu_file) do
+          Logger.info("  Playing menu file: \#{menu_file}")
+          {{:play, menu_file}, %{state | current_state: :menu}}
+        else
+          Logger.info("  Menu file not found, stopping playback")
+          {:stop, %{state | current_state: :done}}
         end
       end
       
       @impl Parrot.MediaHandler
+      def handle_media_request({:play_dtmf, digits}, state) do
+        Logger.info("[<%= @module %> MediaHandler] Media request: play_dtmf")
+        Logger.info("  Playing DTMF digits: \#{digits}")
+        {:ok, :dtmf_played, state}
+      end
+      
+      def handle_media_request({:adjust_volume, level}, state) do
+        Logger.info("[<%= @module %> MediaHandler] Media request: adjust_volume")
+        Logger.info("  Adjusting volume to: \#{level}")
+        {:ok, :volume_adjusted, state}
+      end
+      
       def handle_media_request(request, state) do
         Logger.info("[<%= @module %> MediaHandler] Media request: \#{inspect(request)}")
-        
-        case request do
-          {:play_dtmf, digits} ->
-            Logger.info("  Playing DTMF digits: \#{digits}")
-            {:ok, :dtmf_played, state}
-            
-          {:adjust_volume, level} ->
-            Logger.info("  Adjusting volume to: \#{level}")
-            {:ok, :volume_adjusted, state}
-            
-          _ ->
-            Logger.warning("  Unknown media request")
-            {:error, :unknown_request, state}
-        end
+        Logger.warning("  Unknown media request")
+        {:error, :unknown_request, state}
       end<% end %>
 
       # Private functions

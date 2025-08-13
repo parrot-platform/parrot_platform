@@ -377,65 +377,7 @@ defmodule Parrot.Sip.TransactionStatem do
       {:send_response, response} ->
         Logger.debug("[process_actions] Action is :send_response. Response: #{inspect(response)}")
         # Try to get the source from state, transaction, or response
-        source =
-          cond do
-            Map.has_key?(data, :source) and not is_nil(data.source) ->
-              Logger.debug(
-                "[process_actions] Found source in data.source: #{inspect(data.source)}"
-              )
-
-              data.source
-
-            Map.has_key?(data, :trans) and Map.has_key?(data.trans, :source) and
-                not is_nil(data.trans.source) ->
-              Logger.debug(
-                "[process_actions] Found source in data.trans.source: #{inspect(data.trans.source)}"
-              )
-
-              data.trans.source
-
-            Map.has_key?(data, :data) and Map.has_key?(data.data, :source) and
-                not is_nil(data.data.source) ->
-              Logger.debug(
-                "[process_actions] Found source in data.data.source: #{inspect(data.data.source)}"
-              )
-
-              data.data.source
-
-            Map.has_key?(data, :transaction) and Map.has_key?(data.transaction, :source) and
-                not is_nil(data.transaction.source) ->
-              Logger.debug(
-                "[process_actions] Found source in data.transaction.source: #{inspect(data.transaction.source)}"
-              )
-
-              data.transaction.source
-
-            Map.has_key?(data, :origmsg) and Map.has_key?(data.origmsg, :source) and
-                not is_nil(data.origmsg.source) ->
-              Logger.debug(
-                "[process_actions] Found source in data.origmsg.source: #{inspect(data.origmsg.source)}"
-              )
-
-              data.origmsg.source
-
-            Map.has_key?(data, :origmsg) and is_map(data.origmsg) and
-              Map.has_key?(data.origmsg, :headers) and Map.has_key?(data.origmsg.headers, "via") ->
-              # fallback: try to build a source from Via header if possible
-              via = data.origmsg.headers["via"]
-              Logger.debug("[process_actions] Built source from Via header: #{inspect(via)}")
-              %Parrot.Sip.Source{remote: {via.host, via.port}, transport: via.transport}
-
-            Map.has_key?(response, :source) and not is_nil(response.source) ->
-              Logger.debug(
-                "[process_actions] Found source in response.source: #{inspect(response.source)}"
-              )
-
-              response.source
-
-            true ->
-              Logger.debug("[process_actions] No source found in any known location.")
-              nil
-          end
+        source = extract_source(data, response)
 
         if source do
           Logger.debug("[process_actions] Sending response using source: #{inspect(source)}")
@@ -496,9 +438,22 @@ defmodule Parrot.Sip.TransactionStatem do
       :retransmit_last_response ->
         Logger.debug("[process_actions] Action is :retransmit_last_response.")
 
-        if last = get_in(data, [:trans, :last_response]) do
-          Logger.debug("[process_actions] Retransmitting last response: #{inspect(last)}")
-          Parrot.Sip.Transport.send_response(last)
+        last_response =
+          get_in(data, [:transaction, :last_response]) ||
+            get_in(data, [:data, :transaction, :last_response])
+
+        if last_response do
+          Logger.debug(
+            "[process_actions] Retransmitting last response: #{inspect(last_response)}"
+          )
+
+          source = extract_source(data, last_response)
+
+          if source do
+            Parrot.Sip.Transport.send_response(last_response, source)
+          else
+            Parrot.Sip.Transport.send_response(last_response)
+          end
         else
           Logger.debug("[process_actions] No last response to retransmit.")
         end
@@ -532,6 +487,73 @@ defmodule Parrot.Sip.TransactionStatem do
       {ref, new_timers} ->
         Process.cancel_timer(ref)
         %{data | timers: new_timers}
+    end
+  end
+
+  defp extract_source(data, response) do
+    cond do
+      # Check direct source in data
+      Map.has_key?(data, :source) and not is_nil(data.source) ->
+        Logger.debug("[extract_source] Found source in data.source: #{inspect(data.source)}")
+        data.source
+
+      # Check nested data.data.source
+      Map.has_key?(data, :data) and Map.has_key?(data.data, :source) and
+          not is_nil(data.data.source) ->
+        Logger.debug(
+          "[extract_source] Found source in data.data.source: #{inspect(data.data.source)}"
+        )
+
+        data.data.source
+
+      # Check transaction source
+      Map.has_key?(data, :transaction) and Map.has_key?(data.transaction, :source) and
+          not is_nil(data.transaction.source) ->
+        Logger.debug(
+          "[extract_source] Found source in data.transaction.source: #{inspect(data.transaction.source)}"
+        )
+
+        data.transaction.source
+
+      # Check nested data.data.transaction.source
+      Map.has_key?(data, :data) and Map.has_key?(data.data, :transaction) and
+        Map.has_key?(data.data.transaction, :source) and not is_nil(data.data.transaction.source) ->
+        Logger.debug("[extract_source] Found source in data.data.transaction.source")
+        data.data.transaction.source
+
+      # Check origmsg source
+      Map.has_key?(data, :origmsg) and Map.has_key?(data.origmsg, :source) and
+          not is_nil(data.origmsg.source) ->
+        Logger.debug(
+          "[extract_source] Found source in data.origmsg.source: #{inspect(data.origmsg.source)}"
+        )
+
+        data.origmsg.source
+
+      # Check nested data.data.origmsg.source
+      Map.has_key?(data, :data) and Map.has_key?(data.data, :origmsg) and
+        Map.has_key?(data.data.origmsg, :source) and not is_nil(data.data.origmsg.source) ->
+        Logger.debug("[extract_source] Found source in data.data.origmsg.source")
+        data.data.origmsg.source
+
+      # Try to build from Via header
+      Map.has_key?(data, :origmsg) and is_map(data.origmsg) and
+        Map.has_key?(data.origmsg, :headers) and Map.has_key?(data.origmsg.headers, "via") ->
+        via = data.origmsg.headers["via"]
+        Logger.debug("[extract_source] Built source from Via header: #{inspect(via)}")
+        %Parrot.Sip.Source{remote: {via.host, via.port}, transport: via.transport}
+
+      # Check response source
+      Map.has_key?(response, :source) and not is_nil(response.source) ->
+        Logger.debug(
+          "[extract_source] Found source in response.source: #{inspect(response.source)}"
+        )
+
+        response.source
+
+      true ->
+        Logger.debug("[extract_source] No source found in any known location.")
+        nil
     end
   end
 
@@ -593,23 +615,23 @@ defmodule Parrot.Sip.TransactionStatem do
     process_actions(actions, new_state)
   end
 
-  def trying(:cast, :cancel, %{data: %{handler: handler, transaction: transaction}} = data) do
-    Logger.debug("trans: canceling server transaction. state: #{inspect(data, @inspect_opts)}")
+  def trying(:cast, :cancel, %{data: %{handler: handler, transaction: transaction}} = state) do
+    Logger.debug("trans: canceling server transaction. state: #{inspect(state, @inspect_opts)}")
     UAS.process_cancel(transaction, handler)
-    {:keep_state, data}
+    {:keep_state, state}
   end
 
   # Handle cancel events for client transactions
-  def trying(:cast, :cancel, %{data: %{cancelled: true}} = data) do
+  def trying(:cast, :cancel, %{data: %{cancelled: true}} = state) do
     Logger.debug(
-      "trans: transaction is already cancelled. state: #{inspect(data, @inspect_opts)}"
+      "trans: transaction is already cancelled. state: #{inspect(state, @inspect_opts)}"
     )
 
-    {:keep_state, data}
+    {:keep_state, state}
   end
 
-  def trying(:cast, :cancel, %{data: %{cancelled: false, outreq: out_req} = inner_data} = data) do
-    Logger.debug("trans: canceling client transaction. state: #{inspect(data, @inspect_opts)}")
+  def trying(:cast, :cancel, %{data: %{cancelled: false, outreq: out_req} = data} = state) do
+    Logger.debug("trans: canceling client transaction. state: #{inspect(state, @inspect_opts)}")
     # Generate CANCEL request from original request
     cancel_req = %{
       method: :cancel,
@@ -625,7 +647,7 @@ defmodule Parrot.Sip.TransactionStatem do
 
     _ = client_new(cancel_req, %{}, fn _ -> :ok end)
     # Schedule cancel timeout
-    {:keep_state, %{data | data: %{inner_data | cancelled: true}},
+    {:keep_state, %{state | data: %{data | cancelled: true}},
      [{:state_timeout, 32_000, :cancel_timeout}]}
   end
 
@@ -642,72 +664,28 @@ defmodule Parrot.Sip.TransactionStatem do
     {:keep_state, new_state}
   end
 
-  # Handle sending responses in trying state
-  def trying(:cast, {:send, response}, %{data: %{trans: trans} = data} = state) do
-    Logger.debug(
-      "trying state: processing {:send, response} for transaction type: #{trans.type}, method: #{trans.method}"
-    )
-
-    Logger.debug("Response being sent: #{response.status_code} #{response.reason_phrase}")
-
-    # Process the send event through the transaction state machine
-    {new_trans, actions} = Parrot.Sip.Transaction.handle_event({:send, response}, trans)
-
-    Logger.debug(
-      "Transaction state after handle_event: #{new_trans.state}, actions: #{inspect(actions)}"
-    )
-
-    new_data = %{data | trans: new_trans}
-
-    # Process the actions returned by the transaction
-    case process_actions(actions, new_data) do
-      {:keep_state_and_data, _} ->
-        # Check if state changed
-        if trans.state != new_trans.state do
-          {:next_state, new_trans.state, %{state | data: new_data}}
-        else
-          {:keep_state, %{state | data: new_data}}
-        end
-
-      {:keep_state, _} ->
-        # Check if state changed
-        if trans.state != new_trans.state do
-          {:next_state, new_trans.state, %{state | data: new_data}}
-        else
-          {:keep_state, %{state | data: new_data}}
-        end
-
-      :stop ->
-        {:stop, :normal, %{state | data: new_data}}
-    end
-  end
-
-  # CATCH-ALL CLAUSES FOR ALL STATES
-
   def trying(_event_type, _event, state) do
     Logger.warning("TransactionStatem.trying/3: Ignoring unexpected event")
     {:keep_state, state}
   end
 
   # PROCEEDING STATE
-  def proceeding(:cast, event, data), do: handle_common_event(event, data)
+  def proceeding(:cast, event, state), do: handle_common_event(event, state)
 
-  def proceeding(event_type, event, state) do
+  def proceeding(_event_type, _event, state) do
     Logger.warning("TransactionStatem.proceeding/3: Ignoring unexpected event")
-    dbg(event_type)
-    dbg(event)
-    dbg(state)
     {:keep_state, state}
   end
 
   # CALLING STATE
   def calling(
         :cast,
-        {:received, %{type: :response} = response},
+        {:received, %{type: :response, status_code: status_code} = response},
         %{type: :client, data: data} = state
-      ) do
+      )
+      when status_code >= 100 and status_code < 200 do
     Logger.debug(
-      "Client transaction received response: #{response.status_code} #{response.reason_phrase}"
+      "Client transaction received provisional response: #{response.status_code} #{response.reason_phrase}"
     )
 
     # Call the user callback with the response
@@ -715,72 +693,67 @@ defmodule Parrot.Sip.TransactionStatem do
       data.handler.({:response, response})
     end
 
-    # Handle state transitions based on response code
-    cond do
-      response.status_code >= 100 and response.status_code < 200 ->
-        # Provisional response - stay in calling state
-        {:keep_state, state}
-
-      response.status_code >= 200 and response.status_code < 300 ->
-        # Success response - move to completed state
-        {:next_state, :completed, state}
-
-      response.status_code >= 300 ->
-        # Final response - move to completed state
-        {:next_state, :completed, state}
-    end
+    # Provisional response - stay in calling state
+    {:keep_state, state}
   end
 
-  def calling(:cast, event, data), do: handle_common_event(event, data)
+  def calling(
+        :cast,
+        {:received, %{type: :response, status_code: status_code} = response},
+        %{type: :client, data: data} = state
+      )
+      when status_code >= 200 do
+    Logger.debug(
+      "Client transaction received final response: #{response.status_code} #{response.reason_phrase}"
+    )
 
-  def calling(event_type, event, state) do
+    # Call the user callback with the response
+    if is_function(data.handler) do
+      data.handler.({:response, response})
+    end
+
+    # Final response - move to completed state
+    {:next_state, :completed, state}
+  end
+
+  def calling(:cast, event, state), do: handle_common_event(event, state)
+
+  def calling(_event_type, _event, state) do
     Logger.warning("TransactionStatem.calling/3: Ignoring unexpected event")
-    dbg(event_type)
-    dbg(event)
-    dbg(state)
     {:keep_state, state}
   end
 
   # COMPLETED STATE
   # Handle sending responses in completed state for retransmissions
-  def completed(:cast, {:send, _response}, %{data: %{trans: trans}} = state) do
+  def completed(:cast, {:send, _response}, %{data: %{transaction: transaction}} = state) do
     Logger.debug(
-      "completed state: processing {:send, response} for transaction type: #{trans.type}"
+      "completed state: processing {:send, response} for transaction type: #{transaction.type}"
     )
 
     # In completed state, we can only retransmit the last response
-    if trans.last_response do
+    if transaction.last_response do
       Logger.debug("Retransmitting last response in completed state")
-      Parrot.Sip.Transport.send_response(trans.last_response)
+      Parrot.Sip.Transport.send_response(transaction.last_response, transaction.source)
     end
 
     {:keep_state, state}
   end
 
-  def completed(:cast, {:received, msg}, %{type: :server, data: data} = state) do
-    # For server transactions, delegate to handle_common_event to process the ACK properly
-    case handle_common_event({:received, msg}, data) do
-      {:next_state, new_state_name, new_data} ->
-        {:next_state, new_state_name, %{state | data: new_data}}
-
-      {:keep_state, new_data} ->
-        {:keep_state, %{state | data: new_data}}
-
-      {:stop, reason, new_data} ->
-        {:stop, reason, %{state | data: new_data}}
-    end
+  def completed(:cast, {:received, msg}, %{type: :server} = state) do
+    handle_common_event({:received, msg}, state)
   end
 
   def completed(:cast, {:received, _msg}, %{type: :client} = state) do
     # For client transactions, retransmit last response if available
     if last = get_in(state, [:data, :transaction, :last_response]) do
-      Parrot.Sip.Transport.send_response(last)
+      source = get_in(state, [:data, :transaction, :source])
+      Parrot.Sip.Transport.send_response(last, source)
     end
 
     {:keep_state, state}
   end
 
-  def completed(:cast, event, data), do: handle_common_event(event, data)
+  def completed(:cast, event, state), do: handle_common_event(event, state)
 
   def completed(_event_type, _event, state) do
     Logger.warning("TransactionStatem.completed/3: Ignoring unexpected event")
@@ -788,7 +761,7 @@ defmodule Parrot.Sip.TransactionStatem do
   end
 
   # CONFIRMED STATE
-  def confirmed(:cast, event, data), do: handle_common_event(event, data)
+  def confirmed(:cast, event, state), do: handle_common_event(event, state)
 
   def confirmed(_event_type, _event, state) do
     Logger.warning("TransactionStatem.confirmed/3: Ignoring unexpected event")
@@ -796,48 +769,55 @@ defmodule Parrot.Sip.TransactionStatem do
   end
 
   # TERMINATED STATE
-  def terminated(:cast, event, data), do: handle_common_event(event, data)
+  def terminated(:cast, _event, state) do
+    Logger.warning(
+      "TransactionStatem.terminated/3: Transaction already terminated, ignoring event"
+    )
+
+    {:keep_state, state}
+  end
 
   def terminated(_event_type, _event, state) do
-    Logger.warning("TransactionStatem.terminated/3: Ignoring unexpected event")
+    Logger.warning(
+      "TransactionStatem.terminated/3: Transaction already terminated, ignoring event"
+    )
+
     {:keep_state, state}
   end
 
   # Handle common events across states
-  defp handle_common_event({:received, sip_msg} = ev, %{trans: trans} = data) do
-    # Log response info if it's a response
-    case sip_msg.type do
-      :response ->
-        log_response_info(sip_msg, data)
+  defp handle_common_event({:received, %{type: :response} = sip_msg} = ev, %{data: data} = state) do
+    log_response_info(sip_msg, data)
+    handle_common_event_impl(ev, state)
+  end
 
-      _ ->
-        :ok
-    end
+  defp handle_common_event({:received, _sip_msg} = ev, state) do
+    handle_common_event_impl(ev, state)
+  end
 
-    {new_trans, actions} = Parrot.Sip.Transaction.handle_event(ev, trans)
-    new_data = %{data | trans: new_trans}
+  defp handle_common_event(_event, state) do
+    {:keep_state, state}
+  end
+
+  defp handle_common_event_impl(ev, %{data: %{transaction: transaction} = data} = state) do
+    {new_trans, actions} = Parrot.Sip.Transaction.handle_event(ev, transaction)
+    new_data = %{data | transaction: new_trans}
+    new_state = %{state | data: new_data}
 
     # Check if the transaction state has changed and we need to transition gen_statem state
-    result =
-      case {trans.state, new_trans.state} do
-        {old_state, new_state} when old_state != new_state ->
-          # State has changed, transition to the new state
-          case process_actions(actions, new_data) do
-            {:keep_state_and_data, _} -> {:next_state, new_state, new_data}
-            {:keep_state, _} -> {:next_state, new_state, new_data}
-            :stop -> {:stop, :normal, new_data}
-          end
-
-        _ ->
-          # State hasn't changed
-          case process_actions(actions, new_data) do
-            {:keep_state_and_data, _} -> {:keep_state, new_data}
-            {:keep_state, _} -> {:keep_state, new_data}
-            :stop -> {:stop, :normal, new_data}
-          end
+    if transaction.state != new_trans.state do
+      case process_actions(actions, new_state) do
+        {:keep_state_and_data, _} -> {:next_state, new_trans.state, new_state}
+        {:keep_state, _} -> {:next_state, new_trans.state, new_state}
+        :stop -> {:stop, :normal, new_state}
       end
-
-    result
+    else
+      case process_actions(actions, new_state) do
+        {:keep_state_and_data, _} -> {:keep_state, new_state}
+        {:keep_state, _} -> {:keep_state, new_state}
+        :stop -> {:stop, :normal, new_state}
+      end
+    end
   end
 
   # Add terminate callback
@@ -857,26 +837,33 @@ defmodule Parrot.Sip.TransactionStatem do
         :info,
         {:DOWN, ref, :process, pid, _},
         _state,
-        %{trans: trans, owner_mon: ref, data: %{origmsg: _sip_msg}} = data
+        %{owner_mon: ref, data: %{transaction: transaction, origmsg: _sip_msg}} = state
       ) do
-    if trans.last_response && trans.last_response.status_code >= 200 do
-      {:keep_state, data}
+    if transaction.last_response && transaction.last_response.status_code >= 200 do
+      {:keep_state, state}
     else
-      handle_owner_down(pid, data)
+      handle_owner_down(pid, state)
     end
   end
 
-  def handle_event(:info, {:event, timer_event}, _state, %{trans: trans} = data) do
+  def handle_event(
+        :info,
+        {:event, timer_event},
+        _state,
+        %{data: %{transaction: transaction} = data} = state
+      ) do
     Logger.debug(
-      "trans: timer fired #{inspect(timer_event)}. state: #{inspect(data, @inspect_opts)}"
+      "trans: timer fired #{inspect(timer_event)}. state: #{inspect(state, @inspect_opts)}"
     )
 
-    {new_trans, actions} = Parrot.Sip.Transaction.handle_event({:timer, timer_event}, trans)
-    new_data = %{data | trans: new_trans}
+    {new_trans, actions} = Parrot.Sip.Transaction.handle_event({:timer, timer_event}, transaction)
+    new_data = %{data | transaction: new_trans}
+    new_state = %{state | data: new_data}
 
-    case process_actions(actions, new_data) do
-      :continue -> {:keep_state, new_data}
-      :stop -> {:stop, :normal, new_data}
+    case process_actions(actions, new_state) do
+      {:keep_state_and_data, _} -> {:keep_state, new_state}
+      {:keep_state, _} -> {:keep_state, new_state}
+      :stop -> {:stop, :normal, new_state}
     end
   end
 
@@ -884,20 +871,23 @@ defmodule Parrot.Sip.TransactionStatem do
         :state_timeout,
         :cancel_timeout,
         _state,
-        %{trans: trans, data: %{callback: callback}} = data
+        %{data: %{transaction: transaction, handler: handler}} = state
       ) do
-    unless trans.last_response && trans.last_response.status_code >= 200 do
+    unless transaction.last_response && transaction.last_response.status_code >= 200 do
       Logger.warning("trans: remote side did not respond after CANCEL request: terminate")
-      callback.({:stop, :timeout})
+
+      if is_function(handler) do
+        handler.({:stop, :timeout})
+      end
     end
 
-    {:stop, :normal, data}
+    {:stop, :normal, state}
   end
 
   # Timer expiry for transaction termination (for Timer H/J)
-  def handle_event(:state_timeout, :terminate, _state, data) do
+  def handle_event(:state_timeout, :terminate, _state, state) do
     Logger.debug("TransactionStatem: Timer expired, terminating transaction.")
-    {:stop, :normal, data}
+    {:stop, :normal, state}
   end
 
   # Handle DOWN messages for client transactions
@@ -905,7 +895,7 @@ defmodule Parrot.Sip.TransactionStatem do
         :info,
         {:DOWN, ref, :process, pid, _},
         _state,
-        %{trans: trans, owner_mon: ref, data: %{outreq: out_req}} = data
+        %{owner_mon: ref, data: %{transaction: transaction, outreq: out_req}} = state
       ) do
     request_msg =
       case out_req do
@@ -915,33 +905,33 @@ defmodule Parrot.Sip.TransactionStatem do
       end
 
     if (request_msg && request_msg.method == :invite) and
-         not (trans.last_response && trans.last_response.status_code >= 200) do
+         not (transaction.last_response && transaction.last_response.status_code >= 200) do
       Logger.debug(
-        "trans: owner is dead: #{inspect(pid)}: cancel transaction. state: #{inspect(data)}"
+        "trans: owner is dead: #{inspect(pid)}: cancel transaction. state: #{inspect(state)}"
       )
 
-      {:keep_state, data, [{:next_event, :cast, :cancel}]}
+      {:keep_state, state, [{:next_event, :cast, :cancel}]}
     else
-      {:keep_state, data}
+      {:keep_state, state}
     end
   end
 
   # Handle unexpected messages
-  def handle_event(:info, msg, _state, data) do
+  def handle_event(:info, msg, _state, state) do
     Logger.error("trans: unexpected info: #{inspect(msg, @inspect_opts)}")
-    {:keep_state, data}
+    {:keep_state, state}
   end
 
   # Handle unexpected casts
-  def handle_event(:cast, msg, _state, data) do
+  def handle_event(:cast, msg, _state, state) do
     Logger.error("trans: unexpected cast: #{inspect(msg, @inspect_opts)}")
-    {:keep_state, data}
+    {:keep_state, state}
   end
 
   # Handle unexpected calls
-  def handle_event({:call, from}, request, _state, data) do
+  def handle_event({:call, from}, request, _state, state) do
     Logger.error("trans: unexpected call: #{inspect(request, @inspect_opts)}")
-    {:keep_state, data, [{:reply, from, {:error, {:unexpected_call, request}}}]}
+    {:keep_state, state, [{:reply, from, {:error, {:unexpected_call, request}}}]}
   end
 
   defp log_response_info(sip_msg, data) do
@@ -954,18 +944,24 @@ defmodule Parrot.Sip.TransactionStatem do
     )
   end
 
-  defp handle_owner_down(pid, %{data: %{auto_resp: code}} = data) do
+  defp handle_owner_down(
+         pid,
+         %{data: %{auto_resp: code, origmsg: origmsg, transaction: transaction} = inner_data} =
+           state
+       ) do
     Logger.debug(
-      "trans: owner is dead: #{inspect(pid)}: auto reply with #{inspect(code)}. state: #{inspect(data)}"
+      "trans: owner is dead: #{inspect(pid)}: auto reply with #{inspect(code)}. state: #{inspect(state)}"
     )
 
-    resp = Message.reply(data.data.origmsg, code)
-    {new_trans, actions} = Parrot.Sip.Transaction.handle_event({:send, resp}, data.trans)
-    new_data = %{data | trans: new_trans}
+    resp = Message.reply(origmsg, code)
+    {new_trans, actions} = Parrot.Sip.Transaction.handle_event({:send, resp}, transaction)
+    new_data = %{inner_data | transaction: new_trans}
+    new_state = %{state | data: new_data}
 
-    case process_actions(actions, new_data) do
-      :continue -> {:keep_state, new_data}
-      :stop -> {:stop, :normal, new_data}
+    case process_actions(actions, new_state) do
+      {:keep_state_and_data, _} -> {:keep_state, new_state}
+      {:keep_state, _} -> {:keep_state, new_state}
+      :stop -> {:stop, :normal, new_state}
     end
   end
 

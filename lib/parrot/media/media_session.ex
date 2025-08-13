@@ -470,25 +470,34 @@ defmodule Parrot.Media.MediaSession do
 
   # Common event handling
 
-  defp handle_common_event(:info, {:DOWN, ref, :process, pid, reason}, _state, data) do
-    cond do
-      ref == data.owner_monitor ->
-        Logger.info("MediaSession #{data.id}: Owner process terminated: #{inspect(reason)}")
-        cleanup_session(data)
-        {:stop, :normal}
+  # Handle owner process termination
+  defp handle_common_event(
+         :info,
+         {:DOWN, ref, :process, _pid, reason},
+         _state,
+         %{owner_monitor: ref} = data
+       ) do
+    Logger.info("MediaSession #{data.id}: Owner process terminated: #{inspect(reason)}")
+    cleanup_session(data)
+    {:stop, :normal}
+  end
 
-      pid == data.pipeline_pid ->
-        Logger.warning(
-          "MediaSession #{data.id}: Membrane pipeline terminated: #{inspect(reason)}"
-        )
+  # Handle pipeline process termination
+  defp handle_common_event(
+         :info,
+         {:DOWN, _ref, :process, pid, reason},
+         _state,
+         %{pipeline_pid: pid} = data
+       ) do
+    Logger.warning("MediaSession #{data.id}: Membrane pipeline terminated: #{inspect(reason)}")
+    updated_data = %{data | pipeline_pid: nil}
+    {:next_state, :ready, updated_data}
+  end
 
-        updated_data = %{data | pipeline_pid: nil}
-        {:next_state, :ready, updated_data}
-
-      true ->
-        Logger.debug("MediaSession #{data.id}: Unknown process down: #{inspect(pid)}")
-        {:keep_state_and_data, []}
-    end
+  # Handle unknown process termination
+  defp handle_common_event(:info, {:DOWN, _ref, :process, pid, _reason}, _state, data) do
+    Logger.debug("MediaSession #{data.id}: Unknown process down: #{inspect(pid)}")
+    {:keep_state_and_data, []}
   end
 
   defp handle_common_event({:call, from}, :get_state, state, data) do
@@ -518,7 +527,6 @@ defmodule Parrot.Media.MediaSession do
   # Codec mapping between symbols and RTP payload types
   # Codec mapping - using standard SDP names
   defp codec_info(:pcma), do: {8, "PCMA/8000", Parrot.Media.MembraneAlawPipeline}
-  # Use dynamic PT 111
   defp codec_info(:opus), do: {111, "opus/48000/2", Parrot.Media.RtpPipeline}
 
   defp get_codec_payload_type(codec) do
@@ -536,20 +544,21 @@ defmodule Parrot.Media.MediaSession do
     module
   end
 
-  defp get_pipeline_module_for_config(codec, data) do
-    # Use PortAudioPipeline if using device audio
-    if data.audio_source == :device || data.audio_sink == :device do
-      Parrot.Media.PortAudioPipeline
-    else
-      # Use codec-specific pipeline for file/network only
-      get_pipeline_module(codec)
-    end
-  end
+  defp get_pipeline_module_for_config(_codec, %{audio_source: :device}),
+    do: Parrot.Media.PortAudioPipeline
+
+  defp get_pipeline_module_for_config(_codec, %{audio_sink: :device}),
+    do: Parrot.Media.PortAudioPipeline
+
+  defp get_pipeline_module_for_config(codec, _data), do: get_pipeline_module(codec)
 
   defp get_pid(session) when is_binary(session) do
     case Registry.lookup(Parrot.Registry, {:media_session, session}) do
-      [{pid, _}] -> pid
-      [] -> raise "MediaSession #{session} not found"
+      [{pid, _}] ->
+        pid
+
+      [] ->
+        raise "MediaSession #{session} not found"
     end
   end
 

@@ -393,16 +393,13 @@ defmodule Parrot.Sip.DialogStatem do
     {:next_state, new_state, updated_data, [{:reply, from, :process}]}
   end
 
-  defp process_uas_response(state, resp_sip_msg, _req_sip_msg, data) do
-    # For early dialogs, check if this response confirms the dialog
-    new_state =
-      if state == :early and resp_sip_msg.status_code >= 200 and resp_sip_msg.status_code < 300 do
-        :confirmed
-      else
-        state
-      end
+  defp process_uas_response(:early, %Message{status_code: status_code}, _req_sip_msg, data)
+       when status_code >= 200 and status_code < 300 do
+    {:next_state, :confirmed, data}
+  end
 
-    {:next_state, new_state, data}
+  defp process_uas_response(state, _resp_sip_msg, _req_sip_msg, data) do
+    {:next_state, state, data}
   end
 
   defp process_uac_trans_result(state, {:message, resp_sip_msg}, data) do
@@ -412,19 +409,17 @@ defmodule Parrot.Sip.DialogStatem do
     updated_data = %{data | dialog: updated_dialog}
 
     # Check state transitions
-    new_state =
-      cond do
-        updated_dialog.state == :terminated -> :terminated
-        updated_dialog.state == :confirmed and state == :early -> :confirmed
-        true -> state
-      end
-
+    new_state = determine_new_state(state, updated_dialog.state)
     {:next_state, new_state, updated_data}
   end
 
   defp process_uac_trans_result(_state, {:stop, _reason}, _data) do
     {:stop, :normal}
   end
+
+  defp determine_new_state(_current, :terminated), do: :terminated
+  defp determine_new_state(:early, :confirmed), do: :confirmed
+  defp determine_new_state(current, _), do: current
 
   defp process_uac_request(_state, req_sip_msg, data, from) do
     # Create in-dialog request
@@ -476,13 +471,9 @@ defmodule Parrot.Sip.DialogStatem do
     {:dialog, DialogId.to_string(dialog_id)}
   end
 
-  defp dialog_type(%Message{method: method}) do
-    case String.upcase(to_string(method)) do
-      "NOTIFY" -> :notify
-      "SUBSCRIBE" -> :notify
-      _ -> :invite
-    end
-  end
+  defp dialog_type(%Message{method: :notify}), do: :notify
+  defp dialog_type(%Message{method: :subscribe}), do: :notify
+  defp dialog_type(%Message{method: _}), do: :invite
 
   defp uas_log_id(%Message{} = msg) do
     call_id = Message.get_header(msg, "call-id")
@@ -498,28 +489,30 @@ defmodule Parrot.Sip.DialogStatem do
 
   defp get_expires(%Message{} = msg, default) do
     case Message.get_header(msg, "expires") do
-      nil ->
-        default
+      nil -> default
+      expires when is_integer(expires) -> expires
+      expires when is_binary(expires) -> parse_expires_string(expires, default)
+      _ -> default
+    end
+  end
 
-      expires when is_integer(expires) ->
-        expires
-
-      expires when is_binary(expires) ->
-        case Integer.parse(expires) do
-          {val, _} -> val
-          :error -> default
-        end
-
-      _ ->
-        default
+  defp parse_expires_string(expires, default) do
+    case Integer.parse(expires) do
+      {val, _} -> val
+      :error -> default
     end
   end
 
   defp get_branch_from_request(%Message{} = request) do
     case Message.get_header(request, "via") do
-      %Via{parameters: %{"branch" => branch}} -> branch
-      [%Via{parameters: %{"branch" => branch}} | _] -> branch
-      _ -> Branch.generate()
+      %Via{parameters: %{"branch" => branch}} ->
+        branch
+
+      [%Via{parameters: %{"branch" => branch}} | _] ->
+        branch
+
+      _ ->
+        Branch.generate()
     end
   end
 
@@ -545,13 +538,13 @@ defmodule Parrot.Sip.DialogStatem do
     end
   end
 
-  defp should_create_dialog?(%Message{status_code: status_code}, %Message{method: method}) do
+  defp should_create_dialog?(%Message{status_code: status_code}, %Message{method: method})
+       when status_code >= 200 and status_code < 300 do
     # Dialogs are created by 2xx responses to INVITE or SUBSCRIBE
-    dialog_creating_method = String.upcase(to_string(method)) in ["INVITE", "SUBSCRIBE"]
-    successful_response = status_code >= 200 and status_code < 300
-
-    dialog_creating_method and successful_response
+    method in [:invite, :subscribe]
   end
+
+  defp should_create_dialog?(_resp, _req), do: false
 
   defp uas_pass_response(dialog_pid, resp_sip_msg, req_sip_msg) do
     :gen_statem.cast(dialog_pid, {:uas_response, resp_sip_msg, req_sip_msg})
@@ -561,22 +554,23 @@ defmodule Parrot.Sip.DialogStatem do
   defp uac_no_dialog_result(%Message{} = out_req, {:message, resp_sip_msg}) do
     # Check if this response creates a dialog
     if should_create_dialog?(resp_sip_msg, out_req) do
-      # Start a new dialog
-      case Parrot.Sip.Dialog.Supervisor.start_child({:uac, out_req, resp_sip_msg}) do
-        {:ok, _pid} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning("Failed to create dialog: #{inspect(reason)}")
-          :ok
-      end
-    else
-      :ok
+      start_uac_dialog(out_req, resp_sip_msg)
     end
+
+    :ok
   end
 
-  defp uac_no_dialog_result(_out_req, {:stop, _reason}) do
-    :ok
+  defp uac_no_dialog_result(_out_req, {:stop, _reason}), do: :ok
+
+  defp start_uac_dialog(out_req, resp_sip_msg) do
+    case Parrot.Sip.Dialog.Supervisor.start_child({:uac, out_req, resp_sip_msg}) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to create dialog: #{inspect(reason)}")
+        :ok
+    end
   end
 
   defp uac_trans_result(dialog_pid, trans_result) do

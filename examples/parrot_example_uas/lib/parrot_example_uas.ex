@@ -66,54 +66,61 @@ defmodule ParrotExampleUas do
   end
 
   @impl true
-  def handle_ack(request, _state) when not is_nil(request) do
+  def handle_ack(nil, _state), do: :noreply
+  
+  def handle_ack(request, _state) do
     Logger.info("[ParrotExampleUas] ACK received")
 
     dialog_id = Parrot.Sip.DialogId.from_message(request)
-
-    # Find and start the media session
-    case Registry.lookup(Parrot.Registry, {:my_app_media, dialog_id.call_id}) do
-      [{_pid, media_session_id}] ->
-        Logger.info("[ParrotExampleUas] Starting media playback for session: #{media_session_id}")
-        Task.start(fn ->
-          Process.sleep(100)
-          Parrot.Media.MediaSession.start_media(media_session_id)
-        end)
-      [] ->
-        Logger.warning("[ParrotExampleUas] No media session found for call: #{dialog_id.call_id}")
-    end
-
+    start_media_for_dialog(dialog_id)
     :noreply
   end
-
-  def handle_ack(nil, _state), do: :noreply
+  
+  defp start_media_for_dialog(dialog_id) do
+    with [{_pid, media_session_id}] <- Registry.lookup(Parrot.Registry, {:my_app_media, dialog_id.call_id}) do
+      Logger.info("[ParrotExampleUas] Starting media playback for session: #{media_session_id}")
+      Task.start(fn ->
+        Process.sleep(100)
+        Parrot.Media.MediaSession.start_media(media_session_id)
+      end)
+    else
+      [] -> Logger.warning("[ParrotExampleUas] No media session found for call: #{dialog_id.call_id}")
+    end
+  end
 
   @impl true
-  def handle_bye(request, _state) when not is_nil(request) do
+  def handle_bye(nil, _state), do: {:respond, 200, "OK", %{}, ""}
+  
+  def handle_bye(request, _state) do
     Logger.info("[ParrotExampleUas] BYE received, ending call")
-
-    dialog_id = Parrot.Sip.DialogId.from_message(request)
-
-    # Clean up media session
+    
+    request
+    |> Parrot.Sip.DialogId.from_message()
+    |> cleanup_media_session()
+    
+    {:respond, 200, "OK", %{}, ""}
+  end
+  
+  defp cleanup_media_session(dialog_id) do
     case Registry.lookup(Parrot.Registry, {:my_app_media, dialog_id.call_id}) do
       [{_pid, media_session_id}] ->
-        Logger.info("[ParrotExampleUas] Terminating media session: #{media_session_id}")
-        # Safely terminate the media session - it might already be gone
-        try do
-          Parrot.Media.MediaSession.terminate_session(media_session_id)
-        rescue
-          RuntimeError ->
-            Logger.warning("[ParrotExampleUas] Media session #{media_session_id} already terminated")
-        end
+        terminate_media_session(media_session_id)
         Registry.unregister(Parrot.Registry, {:my_app_media, dialog_id.call_id})
       [] ->
         Logger.info("[ParrotExampleUas] No media session found for call: #{dialog_id.call_id}")
     end
-
-    {:respond, 200, "OK", %{}, ""}
   end
-
-  def handle_bye(nil, _state), do: {:respond, 200, "OK", %{}, ""}
+  
+  defp terminate_media_session(media_session_id) do
+    Logger.info("[ParrotExampleUas] Terminating media session: #{media_session_id}")
+    
+    try do
+      Parrot.Media.MediaSession.terminate_session(media_session_id)
+    rescue
+      RuntimeError ->
+        Logger.warning("[ParrotExampleUas] Media session #{media_session_id} already terminated")
+    end
+  end
 
   @impl true
   def handle_cancel(_request, _state) do
@@ -197,23 +204,27 @@ defmodule ParrotExampleUas do
     Logger.info("  Offered: #{inspect(offered_codecs)}")
     Logger.info("  Supported: #{inspect(supported_codecs)}")
     
-    # Prefer opus, then pcmu, then pcma
-    codec = cond do
-      :opus in offered_codecs and :opus in supported_codecs -> :opus
-      :pcmu in offered_codecs and :pcmu in supported_codecs -> :pcmu
-      :pcma in offered_codecs and :pcma in supported_codecs -> :pcma
-      true -> 
-        # Pick first common codec
-        Enum.find(offered_codecs, fn c -> c in supported_codecs end)
-    end
+    codec = select_best_codec(offered_codecs, supported_codecs)
     
-    if codec do
-      Logger.info("  Selected codec: #{codec}")
-      {:ok, codec, state}
-    else
-      Logger.error("  No common codec found!")
-      {:error, :no_common_codec, state}
+    case codec do
+      nil ->
+        Logger.error("  No common codec found!")
+        {:error, :no_common_codec, state}
+      _ ->
+        Logger.info("  Selected codec: #{codec}")
+        {:ok, codec, state}
     end
+  end
+  
+  defp select_best_codec(offered, supported) do
+    # Codec preference order
+    [:opus, :pcmu, :pcma]
+    |> Enum.find(&(&1 in offered and &1 in supported))
+    |> Kernel.||(find_any_common_codec(offered, supported))
+  end
+  
+  defp find_any_common_codec(offered, supported) do
+    Enum.find(offered, &(&1 in supported))
   end
   
   @impl Parrot.MediaHandler
@@ -223,15 +234,20 @@ defmodule ParrotExampleUas do
   end
   
   @impl Parrot.MediaHandler
-  def handle_stream_start(session_id, direction, state) do
+  def handle_stream_start(session_id, direction, %{welcome_file: nil} = state) do
+    Logger.info("[ParrotExampleUas MediaHandler] Stream started for #{session_id} (#{direction})")
+    Logger.warning("  No welcome file configured")
+    {:ok, state}
+  end
+  
+  def handle_stream_start(session_id, direction, %{welcome_file: file} = state) do
     Logger.info("[ParrotExampleUas MediaHandler] Stream started for #{session_id} (#{direction})")
     
-    # Start playing welcome message
-    if state.welcome_file && File.exists?(state.welcome_file) do
-      Logger.info("  Playing welcome file: #{state.welcome_file}")
-      {{:play, state.welcome_file}, %{state | current_state: :welcome}}
+    if File.exists?(file) do
+      Logger.info("  Playing welcome file: #{file}")
+      {{:play, file}, %{state | current_state: :welcome}}
     else
-      Logger.warning("  No welcome file configured")
+      Logger.warning("  Welcome file not found: #{file}")
       {:ok, state}
     end
   end
@@ -250,52 +266,61 @@ defmodule ParrotExampleUas do
   end
   
   @impl Parrot.MediaHandler
+  def handle_play_complete(file_path, %{current_state: :welcome} = state) do
+    Logger.info("[ParrotExampleUas MediaHandler] Playback completed: #{file_path}")
+    handle_welcome_complete(state)
+  end
+  
+  def handle_play_complete(file_path, %{current_state: :menu} = state) do
+    Logger.info("[ParrotExampleUas MediaHandler] Playback completed: #{file_path}")
+    Logger.info("  Menu completed, stopping playback")
+    {:stop, %{state | current_state: :done}}
+  end
+  
   def handle_play_complete(file_path, state) do
     Logger.info("[ParrotExampleUas MediaHandler] Playback completed: #{file_path}")
-    
-    case state.current_state do
-      :welcome ->
-        # After welcome, play menu if available
-        cond do
-          state.menu_file && (state.menu_file == "menu.wav" || File.exists?(state.menu_file)) ->
-            Logger.info("  Playing menu file: #{state.menu_file}")
-            {{:play, state.menu_file}, %{state | current_state: :menu}}
-          true ->
-            # No menu, stop
-            Logger.info("  No menu file, stopping playback")
-            {:stop, %{state | current_state: :done}}
-        end
-        
-      :menu ->
-        # After menu, stop (in a real app, you might wait for DTMF)
-        Logger.info("  Menu completed, stopping playback")
-        {:stop, %{state | current_state: :done}}
-        
-      _ ->
-        # Default: stop
-        {:stop, state}
+    {:stop, state}
+  end
+  
+  defp handle_welcome_complete(%{menu_file: nil} = state) do
+    Logger.info("  No menu file, stopping playback")
+    {:stop, %{state | current_state: :done}}
+  end
+  
+  defp handle_welcome_complete(%{menu_file: menu_file} = state) when menu_file == "menu.wav" do
+    Logger.info("  Playing menu file: #{menu_file}")
+    {{:play, menu_file}, %{state | current_state: :menu}}
+  end
+  
+  defp handle_welcome_complete(%{menu_file: menu_file} = state) do
+    if File.exists?(menu_file) do
+      Logger.info("  Playing menu file: #{menu_file}")
+      {{:play, menu_file}, %{state | current_state: :menu}}
+    else
+      Logger.info("  Menu file not found, stopping playback")
+      {:stop, %{state | current_state: :done}}
     end
   end
   
   
   
   @impl Parrot.MediaHandler
+  def handle_media_request({:play_dtmf, digits}, state) do
+    Logger.info("[ParrotExampleUas MediaHandler] Media request: play_dtmf")
+    Logger.info("  Playing DTMF digits: #{digits}")
+    {:ok, :dtmf_played, state}
+  end
+  
+  def handle_media_request({:adjust_volume, level}, state) do
+    Logger.info("[ParrotExampleUas MediaHandler] Media request: adjust_volume")
+    Logger.info("  Adjusting volume to: #{level}")
+    {:ok, :volume_adjusted, state}
+  end
+  
   def handle_media_request(request, state) do
     Logger.info("[ParrotExampleUas MediaHandler] Media request: #{inspect(request)}")
-    
-    case request do
-      {:play_dtmf, digits} ->
-        Logger.info("  Playing DTMF digits: #{digits}")
-        {:ok, :dtmf_played, state}
-        
-      {:adjust_volume, level} ->
-        Logger.info("  Adjusting volume to: #{level}")
-        {:ok, :volume_adjusted, state}
-        
-      _ ->
-        Logger.warning("  Unknown media request")
-        {:error, :unknown_request, state}
-    end
+    Logger.warning("  Unknown media request")
+    {:error, :unknown_request, state}
   end
 
   # Private functions
@@ -306,45 +331,44 @@ defmodule ParrotExampleUas do
   end
 
   defp process_invite(request, _state) do
-    from = request.headers["from"]
-    Logger.info("[ParrotExampleUas] Processing INVITE from: #{from.display_name || from.uri.user}")
-
+    log_invite_from(request)
+    
     dialog_id = Parrot.Sip.DialogId.from_message(request)
     dialog_id_str = Parrot.Sip.DialogId.to_string(dialog_id)
     media_session_id = "media_#{dialog_id_str}"
+    audio_config = build_audio_config()
 
-    # Configure audio files for this call
-    priv_dir = :code.priv_dir(:parrot_platform)
-    audio_config = %{
-      welcome_file: Path.join(priv_dir, "audio/parrot-welcome.wav"),
-      menu_file: Path.join(priv_dir, "audio/parrot-welcome.wav"),  # Using same file for demo
-      music_file: Path.join(priv_dir, "audio/parrot-welcome.wav"),
-      goodbye_file: Path.join(priv_dir, "audio/parrot-welcome.wav"),
-      current_state: :welcome
-    }
-
-    # Start media session
-    case start_media_session(media_session_id, dialog_id_str, audio_config) do
-      {:ok, _pid} ->
-        # Process SDP offer and generate answer
-        case Parrot.Media.MediaSession.process_offer(media_session_id, request.body) do
-          {:ok, sdp_answer} ->
-            Logger.info("[ParrotExampleUas] Call accepted, SDP negotiated")
-
-            # Register media session for later lookup
-            Registry.register(Parrot.Registry, {:my_app_media, dialog_id.call_id}, media_session_id)
-
-            {:respond, 200, "OK", %{}, sdp_answer}
-
-          {:error, reason} ->
-            Logger.error("[ParrotExampleUas] SDP negotiation failed: #{inspect(reason)}")
-            {:respond, 488, "Not Acceptable Here", %{}, ""}
-        end
-
+    with {:ok, _pid} <- start_media_session(media_session_id, dialog_id_str, audio_config),
+         {:ok, sdp_answer} <- Parrot.Media.MediaSession.process_offer(media_session_id, request.body) do
+      Logger.info("[ParrotExampleUas] Call accepted, SDP negotiated")
+      Registry.register(Parrot.Registry, {:my_app_media, dialog_id.call_id}, media_session_id)
+      {:respond, 200, "OK", %{}, sdp_answer}
+    else
+      {:error, :sdp_negotiation_failed = reason} ->
+        Logger.error("[ParrotExampleUas] SDP negotiation failed: #{inspect(reason)}")
+        {:respond, 488, "Not Acceptable Here", %{}, ""}
       {:error, reason} ->
         Logger.error("[ParrotExampleUas] Failed to create media session: #{inspect(reason)}")
         {:respond, 500, "Internal Server Error", %{}, ""}
     end
+  end
+  
+  defp log_invite_from(%{headers: %{"from" => from}}) do
+    caller = from.display_name || from.uri.user
+    Logger.info("[ParrotExampleUas] Processing INVITE from: #{caller}")
+  end
+  
+  defp build_audio_config do
+    priv_dir = :code.priv_dir(:parrot_platform)
+    audio_file = Path.join(priv_dir, "audio/parrot-welcome.wav")
+    
+    %{
+      welcome_file: audio_file,
+      menu_file: audio_file,  # Using same file for demo
+      music_file: audio_file,
+      goodbye_file: audio_file,
+      current_state: :welcome
+    }
   end
 
   defp start_media_session(session_id, dialog_id, audio_config) do

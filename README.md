@@ -46,10 +46,11 @@ Next steps:
 - [ ] create proper silence generator for scenarios where we need it
 - [ ] better pattern matching in media modules
 - [ ] better pattern matching in examples/generators
+- [ ] verify transactions and dialogs do not return responses when they should not from handlers
 - [ ] implement B2BUA and media "bridge"-ing
 - [ ] load test
 - [x] create Parrot Platform audio file welcome message for basic sample app generator to use
-- [x] update Parrot.SipHandler to Parrot.UasHandler
+- [x] update Parrot.SipHandler to Parrot.UasHandler                             o
 - [x] figure out if Handler adapter is a good way to handle things
 - [x] Control Parrot logging levels from the handler behavior
 - [x] update docs to show a pattern matching example of INVITE handling

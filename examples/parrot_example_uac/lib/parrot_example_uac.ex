@@ -111,43 +111,42 @@ defmodule ParrotExampleUac do
   def init(opts) do
     Logger.info("Initializing ParrotExampleUac")
     
-    # Get default audio devices
-    input_device = case opts[:input_device] || AudioDevices.get_default_input() do
-      {:ok, device_id} -> device_id
-      _ -> nil
-    end
-    
-    output_device = case opts[:output_device] || AudioDevices.get_default_output() do
-      {:ok, device_id} -> device_id  
-      _ -> nil
-    end
-    
-    # Start transport
+    input_device = get_audio_device(opts[:input_device], :input)
+    output_device = get_audio_device(opts[:output_device], :output)
     transport_opts = Keyword.get(opts, :transport, %{})
     
-    case start_transport(transport_opts) do
-      {:ok, ref} ->
-        state = %State{
-          transport_ref: ref,
-          input_device_id: input_device,
-          output_device_id: output_device
-        }
-        
-        {:ok, state}
-        
-      {:error, reason} ->
-        {:stop, {:transport_error, reason}}
+    with {:ok, ref} <- start_transport(transport_opts) do
+      state = %State{
+        transport_ref: ref,
+        input_device_id: input_device,
+        output_device_id: output_device
+      }
+      {:ok, state}
+    else
+      {:error, reason} -> {:stop, {:transport_error, reason}}
+    end
+  end
+  
+  defp get_audio_device(nil, :input), do: get_default_device(&AudioDevices.get_default_input/0)
+  defp get_audio_device(nil, :output), do: get_default_device(&AudioDevices.get_default_output/0)
+  defp get_audio_device(device_id, _type), do: device_id
+  
+  defp get_default_device(get_fn) do
+    case get_fn.() do
+      {:ok, device_id} -> device_id
+      _ -> nil
     end
   end
   
   @impl true
+  def handle_call({:make_call, _uri, _opts}, _from, %{current_call: %{}} = state) do
+    {:reply, {:error, :call_in_progress}, state}
+  end
+  
   def handle_call({:make_call, uri, opts}, _from, state) do
-    if state.current_call do
-      {:reply, {:error, :call_in_progress}, state}
-    else
-      # Override default devices if specified
-      input_device = opts[:input_device] || state.input_device_id
-      output_device = opts[:output_device] || state.output_device_id
+    # Override default devices if specified
+    input_device = opts[:input_device] || state.input_device_id
+    output_device = opts[:output_device] || state.output_device_id
       
       case do_make_call(uri, input_device, output_device, state) do
         {:ok, new_state} ->
