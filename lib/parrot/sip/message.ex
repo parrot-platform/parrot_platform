@@ -16,7 +16,6 @@ defmodule Parrot.Sip.Message do
 
   require Logger
 
-  alias Parrot.Sip.DialogId
   alias Parrot.Sip.Headers.{CSeq, From, To, Via, CallId, Contact}
   alias Parrot.Sip.Method
 
@@ -761,10 +760,10 @@ defmodule Parrot.Sip.Message do
       iex> dialog_id.call_id
       "abc@example.com"
   """
-  @spec dialog_id(t()) :: DialogId.t()
+  @spec dialog_id(t()) :: map()
   def dialog_id(message) do
     Logger.debug("Getting dialog_id from message")
-    DialogId.from_message(message)
+    Parrot.Sip.Dialog.from_message(message)
   end
 
   @doc """

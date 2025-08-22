@@ -39,19 +39,80 @@ jobs:
     - name: Check formatting
       run: mix format --check-formatted
     
-#    - name: Compile without warnings
-#      run: mix compile --warnings-as-errors
- 
-    - name: Compile (warnings ok for now)
-      run: mix compile
+    - name: Compile without warnings
+      run: mix compile --warnings-as-errors
 
-    - name: Run tests
-      run: mix test
+    - name: Run unit tests
+      run: mix test --exclude integration --exclude sipp
     
     # Optional: Run dialyzer for type checking
     # - name: Run dialyzer
     #   run: mix dialyzer
     #   if: matrix.elixir == '1.18.x' && matrix.otp == '26.x'
+
+  # SIPp integration tests
+  sipp-tests:
+    name: SIPp Integration Tests
+    runs-on: ubuntu-latest
+    needs: test  # Only run if unit tests pass
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install SIPp
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sipp
+        sipp -v
+    
+    - name: Set up Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        otp-version: '27.x'
+        elixir-version: '1.18.x'
+    
+    - name: Restore dependencies cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-mix-27.x-1.18.x-${{ hashFiles('**/mix.lock') }}
+        restore-keys: ${{ runner.os }}-mix-27.x-1.18.x-
+    
+    - name: Install dependencies
+      run: mix deps.get
+    
+    - name: Compile
+      run: mix compile
+    
+    - name: Run SIPp codec scenarios
+      run: |
+        echo "Running SIPp integration tests..."
+        mix test test/sipp/test_scenarios.exs --include sipp
+      timeout-minutes: 5
+      continue-on-error: false
+    
+    - name: Run codec-specific SIPp tests
+      run: |
+        echo "Testing OPUS codec negotiation..."
+        mix test test/sipp/codec_scenarios_test.exs --include sipp --only opus
+        echo "Testing PCMU codec negotiation..."
+        mix test test/sipp/codec_scenarios_test.exs --include sipp --only pcmu
+        echo "Testing PCMA codec negotiation..."
+        mix test test/sipp/codec_scenarios_test.exs --include sipp --only pcma
+      timeout-minutes: 10
+      continue-on-error: false
+    
+    - name: Upload SIPp error logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: sipp-error-logs
+        path: |
+          /tmp/sipp_error.log
+          test/sipp/scenarios/*.log
+        retention-days: 7
 
   # Optional: Check documentation can be generated
   docs:

@@ -212,7 +212,8 @@ defmodule Parrot.Sip.Transport.UdpTest do
       assert :ok = Udp.send_response(response, source)
     end
 
-    test "handles large messages", %{udp_port: port} do
+    test "handles messages near MTU limit", %{udp_port: port} do
+      # Note: Messages larger than MTU should use TCP/TLS transport
       large_req = build_large_request(port)
 
       assert :ok = Udp.send_request(large_req)
@@ -271,7 +272,7 @@ defmodule Parrot.Sip.Transport.UdpTest do
                         method: method,
                         source: %Source{remote: {remote_addr, remote_port}},
                         direction: direction,
-                        dialog_id: %Parrot.Sip.DialogId{direction: dialog_direction}
+                        dialog_id: %{direction: dialog_direction}
                       } = _msg},
                      100
 
@@ -588,7 +589,9 @@ defmodule Parrot.Sip.Transport.UdpTest do
 
   defp build_large_request(port) do
     message = build_invite_message(port)
-    large_body = String.duplicate("a", 10000)
+    # UDP MTU is typically 1500 bytes, safe payload is ~1200 bytes
+    # Testing with 1100 bytes to stay under MTU limit
+    large_body = String.duplicate("a", 1100)
 
     %{
       message: %{message | body: large_body},

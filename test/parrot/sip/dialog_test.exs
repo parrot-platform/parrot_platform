@@ -1,346 +1,483 @@
 defmodule Parrot.Sip.DialogTest do
-  use ExUnit.Case
-
+  use ExUnit.Case, async: true
+  
   alias Parrot.Sip.Dialog
   alias Parrot.Sip.Message
-  alias Parrot.Sip.Headers
+  alias Parrot.Sip.Headers.{From, To, CSeq, Contact}
+  alias Parrot.Sip.Uri
 
-  describe "dialog creation" do
-    test "creates a dialog from UAS perspective" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog} = Dialog.uas_create(invite, response)
-
-      assert is_binary(dialog.id)
-      assert dialog.state == :confirmed
-      assert dialog.call_id == invite.headers["call-id"]
-      assert dialog.local_tag == "a6c85cf"
-      assert dialog.remote_tag == "1928301774"
-      assert dialog.local_uri == "sip:bob@biloxi.com"
-      assert dialog.remote_uri == "sip:alice@atlanta.com"
-      assert dialog.remote_target == "sip:alice@pc33.atlanta.com"
-      assert dialog.local_seq == 0
-      assert dialog.remote_seq == 314_159
-      assert dialog.secure == false
-      assert dialog.route_set == []
+  describe "from_message/1" do
+    test "extracts dialog ID from incoming request" do
+      request = %Message{
+        type: :request,
+        method: :invite,
+        direction: :incoming,
+        headers: %{
+          "from" => %From{parameters: %{"tag" => "from-tag-123"}},
+          "to" => %To{parameters: %{"tag" => "to-tag-456"}},
+          "call-id" => "call-123@example.com"
+        }
+      }
+      
+      dialog_id = Dialog.from_message(request)
+      
+      assert dialog_id.call_id == "call-123@example.com"
+      assert dialog_id.local_tag == "from-tag-123"
+      assert dialog_id.remote_tag == "to-tag-456"
+      assert dialog_id.direction == :uas
     end
 
-    test "creates an early dialog from UAS perspective" do
-      invite = create_invite_request()
-      response = create_180_ringing_response(invite)
-
-      {:ok, dialog} = Dialog.uas_create(invite, response)
-
-      assert is_binary(dialog.id)
-      assert dialog.state == :early
-      assert dialog.call_id == invite.headers["call-id"]
-      assert dialog.local_tag == "a6c85cf"
-      assert dialog.remote_tag == "1928301774"
+    test "extracts dialog ID from outgoing request" do
+      request = %Message{
+        type: :request,
+        method: :bye,
+        direction: :outgoing,
+        headers: %{
+          "from" => %From{parameters: %{"tag" => "from-tag-123"}},
+          "to" => %To{parameters: %{"tag" => "to-tag-456"}},
+          "call-id" => "call-123@example.com"
+        }
+      }
+      
+      dialog_id = Dialog.from_message(request)
+      
+      assert dialog_id.call_id == "call-123@example.com"
+      assert dialog_id.local_tag == "from-tag-123"
+      assert dialog_id.remote_tag == "to-tag-456"
+      assert dialog_id.direction == :uac
     end
 
-    test "creates a dialog from UAC perspective" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog} = Dialog.uac_create(invite, response)
-
-      assert is_binary(dialog.id)
-      assert dialog.state == :confirmed
-      assert dialog.call_id == invite.headers["call-id"]
-      assert dialog.local_tag == "1928301774"
-      assert dialog.remote_tag == "a6c85cf"
-      assert dialog.local_uri == "sip:alice@atlanta.com"
-      assert dialog.remote_uri == "sip:bob@biloxi.com"
-      assert dialog.remote_target == "sip:bob@192.0.2.4"
-      assert dialog.local_seq == 314_159
-      assert dialog.remote_seq == 0
-      assert dialog.secure == false
-      assert dialog.route_set == []
+    test "extracts dialog ID from incoming response" do
+      response = %Message{
+        type: :response,
+        status_code: 200,
+        direction: :incoming,
+        headers: %{
+          "from" => %From{parameters: %{"tag" => "from-tag-123"}},
+          "to" => %To{parameters: %{"tag" => "to-tag-456"}},
+          "call-id" => "call-123@example.com"
+        }
+      }
+      
+      dialog_id = Dialog.from_message(response)
+      
+      # For responses, tags are swapped
+      assert dialog_id.call_id == "call-123@example.com"
+      assert dialog_id.local_tag == "to-tag-456"
+      assert dialog_id.remote_tag == "from-tag-123"
+      assert dialog_id.direction == :uas
     end
 
-    test "creates an early dialog from UAC perspective" do
-      invite = create_invite_request()
-      response = create_180_ringing_response(invite)
-
-      {:ok, dialog} = Dialog.uac_create(invite, response)
-
-      assert is_binary(dialog.id)
-      assert dialog.state == :early
-      assert dialog.call_id == invite.headers["call-id"]
-      assert dialog.local_tag == "1928301774"
-      assert dialog.remote_tag == "a6c85cf"
-    end
-  end
-
-  describe "dialog ID generation" do
-    test "generates consistent dialog ID for UAS" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog1} = Dialog.uas_create(invite, response)
-      {:ok, dialog2} = Dialog.uas_create(invite, response)
-
-      assert is_binary(dialog1.id)
-      assert dialog1.id == dialog2.id
-    end
-
-    test "generates consistent dialog ID for UAC" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog1} = Dialog.uac_create(invite, response)
-      {:ok, dialog2} = Dialog.uac_create(invite, response)
-
-      assert is_binary(dialog1.id)
-      assert dialog1.id == dialog2.id
+    test "handles missing To tag in initial request" do
+      request = %Message{
+        type: :request,
+        method: :invite,
+        direction: :incoming,
+        headers: %{
+          "from" => %From{parameters: %{"tag" => "from-tag-123"}},
+          "to" => %To{parameters: %{}},
+          "call-id" => "call-123@example.com"
+        }
+      }
+      
+      dialog_id = Dialog.from_message(request)
+      
+      assert dialog_id.call_id == "call-123@example.com"
+      assert dialog_id.local_tag == "from-tag-123"
+      assert dialog_id.remote_tag == nil
+      assert dialog_id.direction == :uas
     end
   end
 
-  describe "dialog state management" do
-    test "processes in-dialog request (UAS)" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog} = Dialog.uas_create(invite, response)
-      bye = create_bye_request(dialog)
-
-      {:ok, updated_dialog} = Dialog.uas_process(bye, dialog)
-
-      assert updated_dialog.state == :terminated
+  describe "to_string/1" do
+    test "generates consistent dialog ID string with complete tags" do
+      dialog = %Dialog{
+        call_id: "abc@example.com",
+        local_tag: "tag-123",
+        remote_tag: "tag-456"
+      }
+      
+      result = Dialog.to_string(dialog)
+      assert result == "abc@example.com;local=tag-123;remote=tag-456"
     end
 
-    test "creates request in dialog (UAC)" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog} = Dialog.uac_create(invite, response)
-
-      {:ok, bye, updated_dialog} = Dialog.uac_request(:bye, dialog)
-
-      assert updated_dialog.local_seq == 314_160
-      assert bye.method == :bye
-      assert bye.headers["cseq"].number == 314_160
-      assert bye.headers["from"].parameters["tag"] == "1928301774"
-      assert bye.headers["to"].parameters["tag"] == "a6c85cf"
-      assert bye.headers["call-id"] == "a84b4c76e66710@pc33.atlanta.com"
+    test "generates dialog ID string without remote tag" do
+      dialog = %Dialog{
+        call_id: "abc@example.com",
+        local_tag: "tag-123",
+        remote_tag: nil
+      }
+      
+      result = Dialog.to_string(dialog)
+      assert result == "abc@example.com;local=tag-123"
     end
 
-    test "processes response to in-dialog request" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
-
-      {:ok, dialog} = Dialog.uac_create(invite, response)
-      {:ok, bye, dialog_after_bye} = Dialog.uac_request(:bye, dialog)
-      bye_response = create_bye_response(bye)
-
-      {:ok, final_dialog} = Dialog.uac_response(bye_response, dialog_after_bye)
-
-      assert final_dialog.state == :terminated
+    test "generates dialog ID string from map with direction" do
+      dialog_id = %{
+        call_id: "abc@example.com",
+        local_tag: "tag-123",
+        remote_tag: "tag-456",
+        direction: :uac
+      }
+      
+      result = Dialog.to_string(dialog_id)
+      assert result == "abc@example.com;local=tag-123;remote=tag-456;uac"
     end
 
-    test "updates early dialog to confirmed" do
-      invite = create_invite_request()
-      provisional = create_180_ringing_response(invite)
-
-      {:ok, early_dialog} = Dialog.uac_create(invite, provisional)
-      assert early_dialog.state == :early
-
-      final = create_200_ok_response(invite)
-      {:ok, confirmed_dialog} = Dialog.uac_response(final, early_dialog)
-
-      assert confirmed_dialog.state == :confirmed
+    test "generates dialog ID string from map without direction" do
+      dialog_id = %{
+        call_id: "abc@example.com",
+        local_tag: "tag-123",
+        remote_tag: nil
+      }
+      
+      result = Dialog.to_string(dialog_id)
+      assert result == "abc@example.com;local=tag-123"
     end
   end
 
-  describe "dialog utilities" do
-    test "checks if dialog is early" do
-      invite = create_invite_request()
-      provisional = create_180_ringing_response(invite)
-      final = create_200_ok_response(invite)
-
-      {:ok, early_dialog} = Dialog.uac_create(invite, provisional)
-      {:ok, confirmed_dialog} = Dialog.uac_create(invite, final)
-
-      assert Dialog.is_early?(early_dialog)
-      refute Dialog.is_early?(confirmed_dialog)
+  describe "is_complete?/1" do
+    test "returns true for complete dialog ID" do
+      dialog = %Dialog{
+        local_tag: "tag-123",
+        remote_tag: "tag-456"
+      }
+      
+      assert Dialog.is_complete?(dialog)
     end
 
-    test "checks if dialog is secure" do
-      invite = create_invite_request()
-      response = create_200_ok_response(invite)
+    test "returns false for dialog ID without remote tag" do
+      dialog = %Dialog{
+        local_tag: "tag-123",
+        remote_tag: nil
+      }
+      
+      refute Dialog.is_complete?(dialog)
+    end
 
-      {:ok, dialog} = Dialog.uac_create(invite, response)
+    test "returns false for dialog ID without local tag" do
+      dialog = %Dialog{
+        local_tag: nil,
+        remote_tag: "tag-456"
+      }
+      
+      refute Dialog.is_complete?(dialog)
+    end
 
-      refute Dialog.is_secure?(dialog)
-
-      # Create a secure dialog
-      secure_invite = %{invite | request_uri: "sips:bob@biloxi.com"}
-      {:ok, secure_dialog} = Dialog.uac_create(secure_invite, response)
-
-      assert Dialog.is_secure?(secure_dialog)
+    test "works with map dialog ID" do
+      dialog_id = %{
+        local_tag: "tag-123",
+        remote_tag: "tag-456"
+      }
+      
+      assert Dialog.is_complete?(dialog_id)
     end
   end
 
-  # Helper functions to create test messages
+  describe "new/4" do
+    test "creates dialog ID with all parameters" do
+      dialog_id = Dialog.new("call-123", "local-456", "remote-789", :uas)
+      
+      assert dialog_id.call_id == "call-123"
+      assert dialog_id.local_tag == "local-456"
+      assert dialog_id.remote_tag == "remote-789"
+      assert dialog_id.direction == :uas
+    end
 
-  defp create_invite_request do
-    %Message{
-      method: :invite,
-      request_uri: "sip:bob@biloxi.com",
-      direction: :request,
-      version: "SIP/2.0",
-      headers: %{
-        "via" => %Headers.Via{
-          protocol: "SIP",
-          version: "2.0",
-          transport: :udp,
-          host: "pc33.atlanta.com",
-          parameters: %{"branch" => "z9hG4bK776asdhds"}
-        },
-        "to" => %Headers.To{
-          display_name: "Bob",
-          uri: %Parrot.Sip.Uri{
-            scheme: "sip",
-            user: "bob",
-            host: "biloxi.com",
-            parameters: %{},
-            headers: %{},
-            host_type: :hostname
-          }
-        },
-        "from" => %Headers.From{
-          display_name: "Alice",
-          uri: %Parrot.Sip.Uri{
-            scheme: "sip",
-            user: "alice",
-            host: "atlanta.com",
-            parameters: %{},
-            headers: %{},
-            host_type: :hostname
+    test "creates dialog ID with default direction" do
+      dialog_id = Dialog.new("call-123", "local-456", "remote-789")
+      
+      assert dialog_id.direction == :uac
+    end
+
+    test "creates dialog ID without remote tag" do
+      dialog_id = Dialog.new("call-123", "local-456")
+      
+      assert dialog_id.remote_tag == nil
+      assert dialog_id.direction == :uac
+    end
+  end
+
+  describe "peer_dialog_id/1" do
+    test "swaps tags and direction for UAC" do
+      dialog_id = %{
+        call_id: "call-123",
+        local_tag: "local-456",
+        remote_tag: "remote-789",
+        direction: :uac
+      }
+      
+      peer = Dialog.peer_dialog_id(dialog_id)
+      
+      assert peer.call_id == "call-123"
+      assert peer.local_tag == "remote-789"
+      assert peer.remote_tag == "local-456"
+      assert peer.direction == :uas
+    end
+
+    test "swaps tags and direction for UAS" do
+      dialog_id = %{
+        call_id: "call-123",
+        local_tag: "local-456",
+        remote_tag: "remote-789",
+        direction: :uas
+      }
+      
+      peer = Dialog.peer_dialog_id(dialog_id)
+      
+      assert peer.call_id == "call-123"
+      assert peer.local_tag == "remote-789"
+      assert peer.remote_tag == "local-456"
+      assert peer.direction == :uac
+    end
+  end
+
+  describe "match?/2" do
+    test "returns true for identical dialog IDs" do
+      dialog_id1 = %{
+        call_id: "call-123",
+        local_tag: "tag-456",
+        remote_tag: "tag-789"
+      }
+      
+      dialog_id2 = %{
+        call_id: "call-123",
+        local_tag: "tag-456",
+        remote_tag: "tag-789"
+      }
+      
+      assert Dialog.match?(dialog_id1, dialog_id2)
+    end
+
+    test "returns true for swapped tags (peer perspectives)" do
+      dialog_id1 = %{
+        call_id: "call-123",
+        local_tag: "tag-456",
+        remote_tag: "tag-789"
+      }
+      
+      dialog_id2 = %{
+        call_id: "call-123",
+        local_tag: "tag-789",
+        remote_tag: "tag-456"
+      }
+      
+      assert Dialog.match?(dialog_id1, dialog_id2)
+    end
+
+    test "returns false for different call IDs" do
+      dialog_id1 = %{
+        call_id: "call-123",
+        local_tag: "tag-456",
+        remote_tag: "tag-789"
+      }
+      
+      dialog_id2 = %{
+        call_id: "call-999",
+        local_tag: "tag-456",
+        remote_tag: "tag-789"
+      }
+      
+      refute Dialog.match?(dialog_id1, dialog_id2)
+    end
+
+    test "returns false for different tags" do
+      dialog_id1 = %{
+        call_id: "call-123",
+        local_tag: "tag-456",
+        remote_tag: "tag-789"
+      }
+      
+      dialog_id2 = %{
+        call_id: "call-123",
+        local_tag: "tag-111",
+        remote_tag: "tag-222"
+      }
+      
+      refute Dialog.match?(dialog_id1, dialog_id2)
+    end
+  end
+
+  describe "with_remote_tag/2" do
+    test "updates dialog ID with remote tag" do
+      dialog_id = %{
+        call_id: "call-123",
+        local_tag: "local-456",
+        remote_tag: nil
+      }
+      
+      updated = Dialog.with_remote_tag(dialog_id, "remote-789")
+      
+      assert updated.remote_tag == "remote-789"
+      assert updated.call_id == "call-123"
+      assert updated.local_tag == "local-456"
+    end
+
+    test "overwrites existing remote tag" do
+      dialog_id = %{
+        call_id: "call-123",
+        local_tag: "local-456",
+        remote_tag: "old-remote"
+      }
+      
+      updated = Dialog.with_remote_tag(dialog_id, "new-remote")
+      
+      assert updated.remote_tag == "new-remote"
+    end
+  end
+
+  describe "uas_create/2" do
+    setup do
+      request = %Message{
+        method: :invite,
+        request_uri: "sip:bob@example.com",
+        headers: %{
+          "from" => %From{
+            uri: Uri.parse!("sip:alice@example.com"),
+            parameters: %{"tag" => "from-tag-123"}
           },
-          parameters: %{"tag" => "1928301774"}
-        },
-        "call-id" => "a84b4c76e66710@pc33.atlanta.com",
-        "cseq" => %Headers.CSeq{number: 314_159, method: :invite},
-        "contact" => %Headers.Contact{
-          uri: %Parrot.Sip.Uri{
-            scheme: "sip",
-            user: "alice",
-            host: "pc33.atlanta.com",
-            parameters: %{},
-            headers: %{},
-            host_type: :hostname
-          }
-        },
-        "max-forwards" => 70
-      },
-      body:
-        "v=0\r\no=alice 2890844526 2890844526 IN IP4 pc33.atlanta.com\r\ns=Session SDP\r\nc=IN IP4 pc33.atlanta.com\r\nt=0 0\r\nm=audio 49172 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
-    }
-  end
-
-  defp create_200_ok_response(request) do
-    %Message{
-      status_code: 200,
-      reason_phrase: "OK",
-      direction: :response,
-      version: "SIP/2.0",
-      headers: %{
-        "via" => request.headers["via"],
-        "to" => %{request.headers["to"] | parameters: %{"tag" => "a6c85cf"}},
-        "from" => request.headers["from"],
-        "call-id" => request.headers["call-id"],
-        "cseq" => request.headers["cseq"],
-        "contact" => %Headers.Contact{
-          uri: %Parrot.Sip.Uri{
-            scheme: "sip",
-            user: "bob",
-            host: "192.0.2.4",
-            parameters: %{},
-            headers: %{},
-            host_type: :hostname
+          "to" => %To{
+            uri: Uri.parse!("sip:bob@example.com"),
+            parameters: %{}
+          },
+          "call-id" => "call-123@example.com",
+          "cseq" => %CSeq{number: 100, method: :invite},
+          "contact" => %Contact{
+            uri: Uri.parse!("sip:alice@192.168.1.100:5060")
           }
         }
-      },
-      body:
-        "v=0\r\no=bob 2890844527 2890844527 IN IP4 192.0.2.4\r\ns=\r\nc=IN IP4 192.0.2.4\r\nt=0 0\r\nm=audio 3456 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
-    }
+      }
+      
+      response = %Message{
+        type: :response,
+        status_code: 200,
+        headers: %{
+          "from" => %From{
+            uri: Uri.parse!("sip:alice@example.com"),
+            parameters: %{"tag" => "from-tag-123"}
+          },
+          "to" => %To{
+            uri: Uri.parse!("sip:bob@example.com"),
+            parameters: %{"tag" => "to-tag-456"}
+          },
+          "call-id" => "call-123@example.com",
+          "cseq" => %CSeq{number: 100, method: :invite}
+        }
+      }
+      
+      {:ok, request: request, response: response}
+    end
+
+    test "creates dialog from UAS perspective", %{request: request, response: response} do
+      {:ok, dialog} = Dialog.uas_create(request, response)
+      
+      assert dialog.call_id == "call-123@example.com"
+      assert dialog.local_tag == "to-tag-456"
+      assert dialog.remote_tag == "from-tag-123"
+      assert dialog.local_uri == "sip:bob@example.com"
+      assert dialog.remote_uri == "sip:alice@example.com"
+      assert dialog.remote_target == "sip:alice@192.168.1.100:5060"
+      assert dialog.remote_seq == 100
+      assert dialog.local_seq == 0
+      assert dialog.state == :confirmed
+    end
+
+    test "creates early dialog for provisional response", %{request: request} do
+      provisional = %Message{
+        type: :response,
+        status_code: 180,
+        headers: %{
+          "from" => %From{
+            uri: Uri.parse!("sip:alice@example.com"),
+            parameters: %{"tag" => "from-tag-123"}
+          },
+          "to" => %To{
+            uri: Uri.parse!("sip:bob@example.com"),
+            parameters: %{"tag" => "to-tag-456"}
+          },
+          "call-id" => "call-123@example.com",
+          "cseq" => %CSeq{number: 100, method: :invite}
+        }
+      }
+      
+      {:ok, dialog} = Dialog.uas_create(request, provisional)
+      
+      assert dialog.state == :early
+    end
   end
 
-  defp create_180_ringing_response(request) do
-    %Message{
-      status_code: 180,
-      reason_phrase: "Ringing",
-      direction: :response,
-      version: "SIP/2.0",
-      headers: %{
-        "via" => request.headers["via"],
-        "to" => %{request.headers["to"] | parameters: %{"tag" => "a6c85cf"}},
-        "from" => request.headers["from"],
-        "call-id" => request.headers["call-id"],
-        "cseq" => request.headers["cseq"],
-        "contact" => %Headers.Contact{
-          uri: %Parrot.Sip.Uri{
-            scheme: "sip",
-            user: "bob",
-            host: "192.0.2.4",
-            parameters: %{},
-            headers: %{},
-            host_type: :hostname
+  describe "uac_create/2" do
+    setup do
+      request = %Message{
+        method: :invite,
+        request_uri: "sip:bob@example.com",
+        headers: %{
+          "from" => %From{
+            uri: Uri.parse!("sip:alice@example.com"),
+            parameters: %{"tag" => "from-tag-123"}
+          },
+          "to" => %To{
+            uri: Uri.parse!("sip:bob@example.com"),
+            parameters: %{}
+          },
+          "call-id" => "call-123@example.com",
+          "cseq" => %CSeq{number: 100, method: :invite}
+        }
+      }
+      
+      response = %Message{
+        type: :response,
+        status_code: 200,
+        headers: %{
+          "from" => %From{
+            uri: Uri.parse!("sip:alice@example.com"),
+            parameters: %{"tag" => "from-tag-123"}
+          },
+          "to" => %To{
+            uri: Uri.parse!("sip:bob@example.com"),
+            parameters: %{"tag" => "to-tag-456"}
+          },
+          "call-id" => "call-123@example.com",
+          "cseq" => %CSeq{number: 100, method: :invite},
+          "contact" => %Contact{
+            uri: Uri.parse!("sip:bob@192.168.1.200:5060")
           }
         }
-      },
-      body: ""
-    }
+      }
+      
+      {:ok, request: request, response: response}
+    end
+
+    test "creates dialog from UAC perspective", %{request: request, response: response} do
+      {:ok, dialog} = Dialog.uac_create(request, response)
+      
+      assert dialog.call_id == "call-123@example.com"
+      assert dialog.local_tag == "from-tag-123"
+      assert dialog.remote_tag == "to-tag-456"
+      assert dialog.local_uri == "sip:alice@example.com"
+      assert dialog.remote_uri == "sip:bob@example.com"
+      assert dialog.remote_target == "sip:bob@192.168.1.200:5060"
+      assert dialog.local_seq == 100
+      assert dialog.remote_seq == 0
+      assert dialog.state == :confirmed
+    end
   end
 
-  defp create_bye_request(dialog) do
-    %Message{
-      method: :bye,
-      request_uri: dialog.remote_target,
-      direction: :request,
-      version: "SIP/2.0",
-      headers: %{
-        "via" => %Headers.Via{
-          protocol: "SIP",
-          version: "2.0",
-          transport: :udp,
-          host: "pc33.atlanta.com",
-          parameters: %{"branch" => "z9hG4bK776asdhds"}
-        },
-        "to" => %Headers.To{
-          display_name: nil,
-          uri: %Parrot.Sip.Uri{scheme: "sip", user: "bob", host: "biloxi.com"},
-          parameters: %{"tag" => dialog.remote_tag}
-        },
-        "from" => %Headers.From{
-          display_name: nil,
-          uri: %Parrot.Sip.Uri{scheme: "sip", user: "alice", host: "atlanta.com"},
-          parameters: %{"tag" => dialog.local_tag}
-        },
-        "call-id" => dialog.call_id,
-        "cseq" => %Headers.CSeq{number: dialog.local_seq + 1, method: :bye},
-        "max-forwards" => 70
-      },
-      body: ""
-    }
-  end
+  describe "generate_id/4" do
+    test "generates consistent dialog ID" do
+      id = Dialog.generate_id(:uac, "call-123", "local-456", "remote-789")
+      
+      assert id == "call-123;local=local-456;remote=remote-789;uac"
+    end
 
-  defp create_bye_response(bye_request) do
-    %Message{
-      status_code: 200,
-      reason_phrase: "OK",
-      direction: :response,
-      version: "SIP/2.0",
-      headers: %{
-        "via" => bye_request.headers["via"],
-        "to" => bye_request.headers["to"],
-        "from" => bye_request.headers["from"],
-        "call-id" => bye_request.headers["call-id"],
-        "cseq" => bye_request.headers["cseq"]
-      },
-      body: ""
-    }
+    test "dialog ID is consistent between UAC and UAS perspectives" do
+      # When the same dialog is viewed from different perspectives
+      uac_id = Dialog.generate_id(:uac, "call-123", "alice-tag", "bob-tag")
+      uas_id = Dialog.generate_id(:uas, "call-123", "bob-tag", "alice-tag")
+      
+      # The IDs should be different but related
+      assert uac_id == "call-123;local=alice-tag;remote=bob-tag;uac"
+      assert uas_id == "call-123;local=bob-tag;remote=alice-tag;uas"
+    end
   end
 end

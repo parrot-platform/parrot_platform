@@ -71,7 +71,7 @@ defmodule ParrotExampleUas do
   def handle_ack(request, _state) do
     Logger.info("[ParrotExampleUas] ACK received")
 
-    dialog_id = Parrot.Sip.DialogId.from_message(request)
+    dialog_id = Parrot.Sip.Dialog.from_message(request)
     start_media_for_dialog(dialog_id)
     :noreply
   end
@@ -95,7 +95,7 @@ defmodule ParrotExampleUas do
     Logger.info("[ParrotExampleUas] BYE received, ending call")
     
     request
-    |> Parrot.Sip.DialogId.from_message()
+    |> Parrot.Sip.Dialog.from_message()
     |> cleanup_media_session()
     
     {:respond, 200, "OK", %{}, ""}
@@ -266,39 +266,16 @@ defmodule ParrotExampleUas do
   end
   
   @impl Parrot.MediaHandler
-  def handle_play_complete(file_path, %{current_state: :welcome} = state) do
-    Logger.info("[ParrotExampleUas MediaHandler] Playback completed: #{file_path}")
-    handle_welcome_complete(state)
-  end
-  
-  def handle_play_complete(file_path, %{current_state: :menu} = state) do
-    Logger.info("[ParrotExampleUas MediaHandler] Playback completed: #{file_path}")
-    Logger.info("  Menu completed, stopping playback")
-    {:stop, %{state | current_state: :done}}
-  end
-  
-  def handle_play_complete(file_path, state) do
-    Logger.info("[ParrotExampleUas MediaHandler] Playback completed: #{file_path}")
-    {:stop, state}
-  end
-  
-  defp handle_welcome_complete(%{menu_file: nil} = state) do
-    Logger.info("  No menu file, stopping playback")
-    {:stop, %{state | current_state: :done}}
-  end
-  
-  defp handle_welcome_complete(%{menu_file: menu_file} = state) when menu_file == "menu.wav" do
-    Logger.info("  Playing menu file: #{menu_file}")
-    {{:play, menu_file}, %{state | current_state: :menu}}
-  end
-  
-  defp handle_welcome_complete(%{menu_file: menu_file} = state) do
-    if File.exists?(menu_file) do
-      Logger.info("  Playing menu file: #{menu_file}")
-      {{:play, menu_file}, %{state | current_state: :menu}}
-    else
-      Logger.info("  Menu file not found, stopping playback")
-      {:stop, %{state | current_state: :done}}
+  def handle_play_complete(audio_file, handler_state) do
+    Logger.info("[ParrotExampleUas] Playback complete for file: #{audio_file}")
+    # For demo: loop the welcome file continuously
+    case handler_state.current_state do
+      :welcome ->
+        # Loop back to welcome file
+        {{:play, handler_state.welcome_file}, %{handler_state | current_state: :welcome}}
+      _ ->
+        # Stop after other states
+        {:stop, handler_state}
     end
   end
   
@@ -333,8 +310,8 @@ defmodule ParrotExampleUas do
   defp process_invite(request, _state) do
     log_invite_from(request)
     
-    dialog_id = Parrot.Sip.DialogId.from_message(request)
-    dialog_id_str = Parrot.Sip.DialogId.to_string(dialog_id)
+    dialog_id = Parrot.Sip.Dialog.from_message(request)
+    dialog_id_str = Parrot.Sip.Dialog.to_string(dialog_id)
     media_session_id = "media_#{dialog_id_str}"
     audio_config = build_audio_config()
 
@@ -380,8 +357,15 @@ defmodule ParrotExampleUas do
       audio_file: audio_config.welcome_file,
       media_handler: __MODULE__,
       handler_args: audio_config,
-      supported_codecs: [:pcma]  # Only G.711 A-law for now (Opus send not implemented)
+      supported_codecs: [:opus, :pcma]  # Prefer OPUS, fallback to G.711 A-law
     )
+  end
+
+  # Media handler callbacks for Membrane pipeline
+  def handle_playback_started(session_id, audio_file, handler_state) do
+    Logger.info("[ParrotExampleUas] Playback started for session #{session_id}")
+    Logger.info("  Playing file: #{audio_file}")
+    handler_state
   end
 
 end

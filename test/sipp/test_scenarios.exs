@@ -1,5 +1,8 @@
 defmodule Parrot.SippTest do
   use ExUnit.Case
+  
+  @moduletag :sipp
+  
   require Logger
 
   # Simple handler for SIPp integration tests
@@ -14,9 +17,9 @@ defmodule Parrot.SippTest do
       s=-
       c=IN IP4 127.0.0.1
       t=0 0
-      m=audio 4000 RTP/AVP 0 8
-      a=rtpmap:0 PCMU/8000
+      m=audio 4000 RTP/AVP 8 111
       a=rtpmap:8 PCMA/8000
+      a=rtpmap:111 OPUS/48000
       """
 
       {:respond, 200, "OK", %{}, sdp}

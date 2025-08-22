@@ -157,7 +157,6 @@ defmodule ParrotExampleUac do
           {:reply, error, state}
       end
     end
-  end
   
   @impl true
   def handle_call(:hangup, _from, state) do
@@ -232,7 +231,7 @@ defmodule ParrotExampleUac do
       audio_sink: :device,
       input_device_id: input_device,
       output_device_id: output_device,
-      supported_codecs: [:pcma]  # G.711 A-law
+      supported_codecs: [:opus, :pcma]  # Prefer OPUS, fallback to G.711 A-law
     ) do
       {:ok, media_session, sdp_offer} ->
         Logger.debug("UAC session prepared with SDP offer")

@@ -18,7 +18,7 @@ defmodule Parrot.Sip.DialogStatem do
 
   require Logger
 
-  alias Parrot.Sip.{Dialog, DialogId, Message, Branch}
+  alias Parrot.Sip.{Dialog, Message, Branch}
   alias Parrot.Sip.Headers.{Contact, Via}
 
   @type trans :: {:trans, pid()}
@@ -94,8 +94,13 @@ defmodule Parrot.Sip.DialogStatem do
     {:ok, dialog} = Dialog.uas_create(req_sip_msg, resp_sip_msg)
     dialog_id = dialog.id
 
-    Logger.debug("dialog: init #{inspect(dialog_id)}")
-    Registry.register(Parrot.Registry, dialog_id, nil)
+    Logger.info("dialog: initializing with ID #{inspect(dialog_id)}")
+    case Registry.register(Parrot.Registry, dialog_id, nil) do
+      {:ok, _} -> 
+        Logger.info("dialog: successfully registered with ID #{inspect(dialog_id)}")
+      {:error, {:already_registered, _}} ->
+        Logger.warning("dialog: already registered with ID #{inspect(dialog_id)}")
+    end
 
     data = %Data{
       id: dialog_id,
@@ -178,11 +183,22 @@ defmodule Parrot.Sip.DialogStatem do
   @spec uas_find(Message.t()) :: {:ok, dialog_handle()} | :not_found
   def uas_find(%Message{} = req_sip_msg) do
     # Try to extract dialog ID from the message
-    dialog_id = DialogId.from_message(req_sip_msg)
-
-    if DialogId.is_complete?(dialog_id) do
-      find_dialog(DialogId.to_string(dialog_id))
+    dialog_id = Dialog.from_message(req_sip_msg)
+    
+    if Dialog.is_complete?(dialog_id) do
+      dialog_id_str = Dialog.to_string(dialog_id)
+      Logger.info("uas_find: looking for dialog with ID #{inspect(dialog_id_str)}")
+      result = find_dialog(dialog_id_str)
+      case result do
+        {:ok, pid} -> 
+          Logger.info("uas_find: found dialog #{inspect(dialog_id_str)} at PID #{inspect(pid)}")
+          {:ok, pid}
+        {:error, :no_dialog} -> 
+          Logger.warning("uas_find: dialog #{inspect(dialog_id_str)} not found in registry")
+          :not_found
+      end
     else
+      Logger.debug("uas_find: incomplete dialog ID, not searching")
       :not_found
     end
   end
@@ -192,15 +208,15 @@ defmodule Parrot.Sip.DialogStatem do
     Logger.debug("dialog: uas_request #{inspect(sip_msg)}")
 
     # Check if this message has a complete dialog ID
-    dialog_id = DialogId.from_message(sip_msg)
+    dialog_id = Dialog.from_message(sip_msg)
 
-    if DialogId.is_complete?(dialog_id) do
-      dialog_id_str = DialogId.to_string(dialog_id)
+    if Dialog.is_complete?(dialog_id) do
+      dialog_id_str = Dialog.to_string(dialog_id)
       Logger.debug("dialog: found dialog id #{inspect(dialog_id_str)} in request")
 
       case find_dialog(dialog_id_str) do
         {:error, :no_dialog} ->
-          Logger.warning("dialog #{uas_log_id(sip_msg)}: cannot find dialog")
+          Logger.debug("dialog #{uas_log_id(sip_msg)}: dialog not found (dialog tracking not yet implemented)")
           resp = Message.reply(sip_msg, 481, "Call/Transaction Does Not Exist")
           {:reply, resp}
 
@@ -226,15 +242,15 @@ defmodule Parrot.Sip.DialogStatem do
     Logger.debug("dialog: uas_response #{inspect(resp_sip_msg)}")
 
     # Check if response creates or continues a dialog
-    dialog_id = DialogId.from_message(resp_sip_msg)
+    dialog_id = Dialog.from_message(resp_sip_msg)
 
-    if DialogId.is_complete?(dialog_id) do
-      dialog_id_str = DialogId.to_string(dialog_id)
+    if Dialog.is_complete?(dialog_id) do
+      dialog_id_str = Dialog.to_string(dialog_id)
       Logger.debug("dialog: dialog id #{inspect(dialog_id_str)} in response")
 
       case find_dialog(dialog_id_str) do
         {:error, :no_dialog} ->
-          Logger.warning("dialog #{uas_log_id(resp_sip_msg)}: cannot find dialog")
+          Logger.debug("dialog #{uas_log_id(resp_sip_msg)}: dialog not found (dialog tracking not yet implemented)")
           uas_maybe_create_dialog(resp_sip_msg, req_sip_msg)
 
         {:ok, dialog_pid} ->
@@ -262,10 +278,10 @@ defmodule Parrot.Sip.DialogStatem do
   @spec uac_result(Message.t(), trans_result()) :: :ok
   def uac_result(%Message{} = out_req, trans_result) do
     # Extract dialog ID from the request
-    dialog_id = DialogId.from_message(out_req)
+    dialog_id = Dialog.from_message(out_req)
 
-    if DialogId.is_complete?(dialog_id) do
-      dialog_id_str = DialogId.to_string(dialog_id)
+    if Dialog.is_complete?(dialog_id) do
+      dialog_id_str = Dialog.to_string(dialog_id)
 
       case find_dialog(dialog_id_str) do
         {:error, :no_dialog} ->
@@ -301,9 +317,14 @@ defmodule Parrot.Sip.DialogStatem do
 
   @spec find_dialog(String.t()) :: {:ok, pid()} | {:error, :no_dialog}
   def find_dialog(dialog_id) do
+    Logger.debug("find_dialog: searching for #{inspect(dialog_id)}")
     case Registry.lookup(Parrot.Registry, dialog_id) do
-      [{pid, _}] -> {:ok, pid}
-      [] -> {:error, :no_dialog}
+      [{pid, _}] -> 
+        Logger.debug("find_dialog: found PID #{inspect(pid)} for #{inspect(dialog_id)}")
+        {:ok, pid}
+      [] -> 
+        Logger.debug("find_dialog: no PID found for #{inspect(dialog_id)}")
+        {:error, :no_dialog}
     end
   end
 
@@ -462,13 +483,13 @@ defmodule Parrot.Sip.DialogStatem do
   # Helper functions
 
   defp via_tuple({:uas, resp_sip_msg, _req_sip_msg}) do
-    dialog_id = DialogId.from_message(resp_sip_msg)
-    {:dialog, DialogId.to_string(dialog_id)}
+    dialog_id = Dialog.from_message(resp_sip_msg)
+    {:dialog, Dialog.to_string(dialog_id)}
   end
 
   defp via_tuple({:uac, _out_req, resp_sip_msg}) do
-    dialog_id = DialogId.from_message(resp_sip_msg)
-    {:dialog, DialogId.to_string(dialog_id)}
+    dialog_id = Dialog.from_message(resp_sip_msg)
+    {:dialog, Dialog.to_string(dialog_id)}
   end
 
   defp dialog_type(%Message{method: :notify}), do: :notify
@@ -525,15 +546,19 @@ defmodule Parrot.Sip.DialogStatem do
   defp uas_maybe_create_dialog(%Message{} = resp_sip_msg, %Message{} = req_sip_msg) do
     # Check if this response creates a dialog
     if should_create_dialog?(resp_sip_msg, req_sip_msg) do
+      Logger.info("Creating dialog for #{req_sip_msg.method} response #{resp_sip_msg.status_code}")
       # Start a new dialog
       case Parrot.Sip.Dialog.Supervisor.start_child({:uas, resp_sip_msg, req_sip_msg}) do
-        {:ok, _pid} ->
+        {:ok, pid} ->
+          Logger.info("Dialog created successfully with PID: #{inspect(pid)}")
           resp_sip_msg
 
-        {:error, _reason} ->
+        {:error, reason} ->
+          Logger.error("Failed to create dialog: #{inspect(reason)}")
           resp_sip_msg
       end
     else
+      Logger.debug("Not creating dialog for #{req_sip_msg.method} response #{resp_sip_msg.status_code}")
       resp_sip_msg
     end
   end
@@ -541,10 +566,17 @@ defmodule Parrot.Sip.DialogStatem do
   defp should_create_dialog?(%Message{status_code: status_code}, %Message{method: method})
        when status_code >= 200 and status_code < 300 do
     # Dialogs are created by 2xx responses to INVITE or SUBSCRIBE
-    method in [:invite, :subscribe]
+    # Convert to atom if it's a string
+    method_atom = if is_binary(method), do: String.to_atom(String.downcase(method)), else: method
+    result = method_atom in [:invite, :subscribe]
+    Logger.debug("should_create_dialog? method=#{inspect(method)} (#{inspect(method_atom)}), status=#{status_code}, result=#{result}")
+    result
   end
 
-  defp should_create_dialog?(_resp, _req), do: false
+  defp should_create_dialog?(resp, req) do
+    Logger.debug("should_create_dialog? not 2xx: resp status=#{inspect(resp.status_code)}, req method=#{inspect(req.method)}")
+    false
+  end
 
   defp uas_pass_response(dialog_pid, resp_sip_msg, req_sip_msg) do
     :gen_statem.cast(dialog_pid, {:uas_response, resp_sip_msg, req_sip_msg})

@@ -113,8 +113,6 @@ defmodule Parrot.Sip.TransactionStatemTest do
       message = create_register_request_with_branch("z9hG4bKreg123")
       handler = TestHandler.new()
 
-      dbg(message)
-
       # Should create new transaction
       assert :ok == TransactionStatem.server_process(message, handler)
     end

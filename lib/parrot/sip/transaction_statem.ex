@@ -80,8 +80,6 @@ defmodule Parrot.Sip.TransactionStatem do
 
   def server_process(%Parrot.Sip.Message{method: :ack} = sip_msg, handler) do
     Logger.debug("server_process ack")
-    dbg(sip_msg)
-    dbg(handler)
 
     case find_server(sip_msg) do
       {:ok, pid} ->
@@ -128,8 +126,6 @@ defmodule Parrot.Sip.TransactionStatem do
           _new_dialog_msg ->
             Logger.debug("Creating new transaction for #{sip_msg.method}")
 
-            dbg(Transaction.determine_transaction_type(sip_msg))
-
             transaction =
               case Transaction.determine_transaction_type(sip_msg) do
                 :invite_server ->
@@ -152,7 +148,6 @@ defmodule Parrot.Sip.TransactionStatem do
   @spec server_response(term(), Parrot.Sip.Transaction.t()) :: :ok
   def server_response(resp, %Parrot.Sip.Transaction{} = transaction) do
     Logger.debug("Sending response: #{inspect(resp)}")
-    dbg(via_tuple(transaction))
     :gen_statem.cast(via_tuple(transaction), {:send, resp})
   end
 
@@ -664,16 +659,19 @@ defmodule Parrot.Sip.TransactionStatem do
     {:keep_state, new_state}
   end
 
-  def trying(_event_type, _event, state) do
-    Logger.warning("TransactionStatem.trying/3: Ignoring unexpected event")
+  def trying(event_type, _event, state) do
+    Logger.debug("TransactionStatem.trying/3: Ignoring unexpected event: #{inspect(event_type)}")
     {:keep_state, state}
   end
 
   # PROCEEDING STATE
   def proceeding(:cast, event, state), do: handle_common_event(event, state)
 
-  def proceeding(_event_type, _event, state) do
-    Logger.warning("TransactionStatem.proceeding/3: Ignoring unexpected event")
+  def proceeding(event_type, _event, state) do
+    Logger.debug(
+      "TransactionStatem.proceeding/3: Ignoring unexpected event: #{inspect(event_type)}"
+    )
+
     {:keep_state, state}
   end
 
@@ -718,8 +716,8 @@ defmodule Parrot.Sip.TransactionStatem do
 
   def calling(:cast, event, state), do: handle_common_event(event, state)
 
-  def calling(_event_type, _event, state) do
-    Logger.warning("TransactionStatem.calling/3: Ignoring unexpected event")
+  def calling(event_type, _event, state) do
+    Logger.debug("TransactionStatem.calling/3: Ignoring unexpected event: #{inspect(event_type)}")
     {:keep_state, state}
   end
 
@@ -755,16 +753,22 @@ defmodule Parrot.Sip.TransactionStatem do
 
   def completed(:cast, event, state), do: handle_common_event(event, state)
 
-  def completed(_event_type, _event, state) do
-    Logger.warning("TransactionStatem.completed/3: Ignoring unexpected event")
+  def completed(event_type, _event, state) do
+    Logger.debug(
+      "TransactionStatem.completed/3: Ignoring unexpected event: #{inspect(event_type)}"
+    )
+
     {:keep_state, state}
   end
 
   # CONFIRMED STATE
   def confirmed(:cast, event, state), do: handle_common_event(event, state)
 
-  def confirmed(_event_type, _event, state) do
-    Logger.warning("TransactionStatem.confirmed/3: Ignoring unexpected event")
+  def confirmed(event_type, _event, state) do
+    Logger.debug(
+      "TransactionStatem.confirmed/3: Ignoring unexpected event: #{inspect(event_type)}"
+    )
+
     {:keep_state, state}
   end
 

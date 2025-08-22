@@ -329,7 +329,7 @@ defmodule Mix.Tasks.Parrot.Gen.Uas do
       def handle_ack(request, _state) when not is_nil(request) do
         Logger.info("[<%= @module %>] ACK received")<%= if @include_media do %>
         
-        dialog_id = Parrot.Sip.DialogId.from_message(request)
+        dialog_id = Parrot.Sip.Dialog.from_message(request)
         
         # Find and start the media session
         case Registry.lookup(Parrot.Registry, {:uas_media, dialog_id.call_id}) do
@@ -352,7 +352,7 @@ defmodule Mix.Tasks.Parrot.Gen.Uas do
       def handle_bye(request, _state) when not is_nil(request) do
         Logger.info("[<%= @module %>] BYE received, ending call")<%= if @include_media do %>
         
-        dialog_id = Parrot.Sip.DialogId.from_message(request)
+        dialog_id = Parrot.Sip.Dialog.from_message(request)
         
         # Clean up media session
         case Registry.lookup(Parrot.Registry, {:uas_media, dialog_id.call_id}) do
@@ -567,8 +567,8 @@ defmodule Mix.Tasks.Parrot.Gen.Uas do
         from = request.headers["from"]
         Logger.info("[<%= @module %>] Processing INVITE from: \#{from.display_name || from.uri.user}")<%= if @include_media do %>
         
-        dialog_id = Parrot.Sip.DialogId.from_message(request)
-        dialog_id_str = Parrot.Sip.DialogId.to_string(dialog_id)
+        dialog_id = Parrot.Sip.Dialog.from_message(request)
+        dialog_id_str = Parrot.Sip.Dialog.to_string(dialog_id)
         media_session_id = "media_\#{dialog_id_str}"
         
         # Configure audio files for this call

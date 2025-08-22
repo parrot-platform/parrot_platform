@@ -1,0 +1,258 @@
+defmodule Parrot.Media.TimestampGeneratorTest do
+  use ExUnit.Case, async: true
+  
+  import Membrane.Testing.Assertions
+  import Membrane.ChildrenSpec
+  
+  alias Parrot.Media.TimestampGenerator
+  alias Parrot.Test.RawAudioSource
+  alias Membrane.Testing
+  alias Membrane.Buffer
+  alias Membrane.RawAudio
+  alias Membrane.Time
+  
+  describe "TimestampGenerator" do
+    test "adds timestamps to buffers without PTS" do
+      stream_format = %RawAudio{
+        sample_rate: 8000,
+        channels: 1,
+        sample_format: :s16le
+      }
+      
+      # 160 samples = 20ms at 8kHz, 2 bytes per sample
+      buffer1 = %Buffer{payload: <<0::size(320)-unit(8)>>, pts: nil}
+      buffer2 = %Buffer{payload: <<0::size(320)-unit(8)>>, pts: nil}
+      
+      pipeline =
+        Testing.Pipeline.start_link_supervised!(
+          spec: [
+            child(:source, %RawAudioSource{
+              stream_format: stream_format,
+              buffers: [buffer1, buffer2]
+            })
+            |> child(:timestamp_gen, TimestampGenerator)
+            |> child(:sink, Testing.Sink)
+          ]
+        )
+      
+      # Playing will trigger stream format and buffers
+      Testing.Pipeline.play(pipeline)
+      
+      # Wait for stream format
+      assert_sink_stream_format(pipeline, :sink, ^stream_format, 1000)
+      
+      # Should receive buffer with PTS set to 0
+      assert_sink_buffer(pipeline, :sink, received_buffer1, 1000)
+      assert received_buffer1.pts == 0
+      assert received_buffer1.dts == 0
+      
+      # Should receive buffer with PTS = 20ms
+      assert_sink_buffer(pipeline, :sink, received_buffer2, 1000)
+      assert received_buffer2.pts == Time.milliseconds(20)
+      assert received_buffer2.dts == Time.milliseconds(20)
+      
+      Testing.Pipeline.terminate(pipeline)
+    end
+    
+    test "preserves existing timestamps" do
+      stream_format = %RawAudio{
+        sample_rate: 16000,
+        channels: 2,
+        sample_format: :s16le
+      }
+      
+      # Buffer WITH PTS
+      existing_pts = Time.milliseconds(100)
+      buffer = %Buffer{
+        payload: <<0::size(640)-unit(8)>>,  # 160 samples * 2 channels * 2 bytes
+        pts: existing_pts,
+        dts: existing_pts
+      }
+      
+      pipeline =
+        Testing.Pipeline.start_link_supervised!(
+          spec: [
+            child(:source, %RawAudioSource{
+              stream_format: stream_format,
+              buffers: [buffer]
+            })
+            |> child(:timestamp_gen, TimestampGenerator)
+            |> child(:sink, Testing.Sink)
+          ]
+        )
+      
+      Testing.Pipeline.play(pipeline)
+      
+      # Wait for stream format
+      assert_sink_stream_format(pipeline, :sink, ^stream_format, 1000)
+      
+      # Should receive buffer with original PTS preserved
+      assert_sink_buffer(pipeline, :sink, received_buffer, 1000)
+      assert received_buffer.pts == existing_pts
+      assert received_buffer.dts == existing_pts
+      
+      Testing.Pipeline.terminate(pipeline)
+    end
+    
+    test "calculates correct timestamps for different sample rates" do
+      for sample_rate <- [8000, 16000, 48000] do
+        stream_format = %RawAudio{
+          sample_rate: sample_rate,
+          channels: 1,
+          sample_format: :s16le
+        }
+        
+        # 20ms worth of samples
+        samples_for_20ms = div(sample_rate * 20, 1000)
+        payload_size = samples_for_20ms * 2  # 2 bytes per sample
+        
+        buffer1 = %Buffer{payload: <<0::size(payload_size)-unit(8)>>, pts: nil}
+        buffer2 = %Buffer{payload: <<0::size(payload_size)-unit(8)>>, pts: nil}
+        
+        pipeline =
+          Testing.Pipeline.start_link_supervised!(
+            spec: [
+              child(:source, %RawAudioSource{
+                stream_format: stream_format,
+                buffers: [buffer1, buffer2]
+              })
+              |> child(:timestamp_gen, TimestampGenerator)
+              |> child(:sink, Testing.Sink)
+            ]
+          )
+        
+        Testing.Pipeline.play(pipeline)
+        
+        # Wait for stream format
+        assert_sink_stream_format(pipeline, :sink, ^stream_format, 1000)
+        
+        assert_sink_buffer(pipeline, :sink, received_buffer1, 1000)
+        assert received_buffer1.pts == 0
+        
+        assert_sink_buffer(pipeline, :sink, received_buffer2, 1000)
+        # Should be exactly 20ms later
+        assert received_buffer2.pts == Time.milliseconds(20)
+        
+        Testing.Pipeline.terminate(pipeline)
+      end
+    end
+    
+    test "handles different sample formats correctly" do
+      # Test various sample formats to ensure bytes_per_sample calculation is correct
+      test_cases = [
+        {:s8, 1},
+        {:u8, 1},
+        {:s16le, 2},
+        {:s32le, 4},
+        {:f32le, 4},
+        {:f64le, 8}
+      ]
+      
+      for {sample_format, bytes_per_sample} <- test_cases do
+        stream_format = %RawAudio{
+          sample_rate: 8000,
+          channels: 1,
+          sample_format: sample_format
+        }
+        
+        # 160 samples at 8kHz = 20ms
+        payload_size = 160 * bytes_per_sample
+        buffer = %Buffer{payload: <<0::size(payload_size)-unit(8)>>, pts: nil}
+        
+        pipeline =
+          Testing.Pipeline.start_link_supervised!(
+            spec: [
+              child(:source, %RawAudioSource{
+                stream_format: stream_format,
+                buffers: [buffer]
+              })
+              |> child(:timestamp_gen, TimestampGenerator)
+              |> child(:sink, Testing.Sink)
+            ]
+          )
+        
+        Testing.Pipeline.play(pipeline)
+        
+        assert_sink_stream_format(pipeline, :sink, ^stream_format, 1000)
+        assert_sink_buffer(pipeline, :sink, received_buffer, 1000)
+        assert received_buffer.pts == 0
+        
+        Testing.Pipeline.terminate(pipeline)
+      end
+    end
+    
+    test "handles mixed buffers with and without timestamps" do
+      stream_format = %RawAudio{
+        sample_rate: 8000,
+        channels: 1,
+        sample_format: :s16le
+      }
+      
+      # Mix of buffers with and without PTS
+      buffer1 = %Buffer{payload: <<0::size(320)-unit(8)>>, pts: nil}  # No PTS
+      buffer2 = %Buffer{payload: <<0::size(320)-unit(8)>>, pts: Time.milliseconds(50)}  # Has PTS
+      buffer3 = %Buffer{payload: <<0::size(320)-unit(8)>>, pts: nil}  # No PTS
+      
+      pipeline =
+        Testing.Pipeline.start_link_supervised!(
+          spec: [
+            child(:source, %RawAudioSource{
+              stream_format: stream_format,
+              buffers: [buffer1, buffer2, buffer3]
+            })
+            |> child(:timestamp_gen, TimestampGenerator)
+            |> child(:sink, Testing.Sink)
+          ]
+        )
+      
+      Testing.Pipeline.play(pipeline)
+      
+      assert_sink_stream_format(pipeline, :sink, ^stream_format, 1000)
+      
+      # Buffer 1: Should get PTS = 0
+      assert_sink_buffer(pipeline, :sink, received1, 1000)
+      assert received1.pts == 0
+      
+      # Buffer 2: Should preserve its PTS
+      assert_sink_buffer(pipeline, :sink, received2, 1000)
+      assert received2.pts == Time.milliseconds(50)
+      
+      # Buffer 3: Should continue from where we left off (40ms total)
+      assert_sink_buffer(pipeline, :sink, received3, 1000)
+      assert received3.pts == Time.milliseconds(40)
+      
+      Testing.Pipeline.terminate(pipeline)
+    end
+    
+    test "handles empty pipeline state correctly" do
+      stream_format = %RawAudio{
+        sample_rate: 8000,
+        channels: 1,
+        sample_format: :s16le
+      }
+      
+      # Empty buffers list - should just pass through stream format
+      pipeline =
+        Testing.Pipeline.start_link_supervised!(
+          spec: [
+            child(:source, %RawAudioSource{
+              stream_format: stream_format,
+              buffers: []
+            })
+            |> child(:timestamp_gen, TimestampGenerator)
+            |> child(:sink, Testing.Sink)
+          ]
+        )
+      
+      Testing.Pipeline.play(pipeline)
+      
+      # Should receive stream format
+      assert_sink_stream_format(pipeline, :sink, ^stream_format, 1000)
+      
+      # Should receive end_of_stream
+      assert_end_of_stream(pipeline, :sink, :input, 1000)
+      
+      Testing.Pipeline.terminate(pipeline)
+    end
+  end
+end

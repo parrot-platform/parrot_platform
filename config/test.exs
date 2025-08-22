@@ -20,4 +20,9 @@ config :logger, level: log_level
 
 config :parrot_platform,
   test_sip_trace: sip_trace,
-  test_log_level: log_level
+  test_log_level: log_level,
+  # SIPp test configuration for CI/CD
+  sipp_test_timeout: 10_000,
+  sipp_test_retries: 3,
+  sipp_scenarios_path: Path.join([File.cwd!(), "test", "sipp", "scenarios"]),
+  sipp_error_log: "/tmp/sipp_error.log"

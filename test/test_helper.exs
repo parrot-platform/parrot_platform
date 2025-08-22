@@ -8,9 +8,17 @@ log_level = System.get_env("LOG_LEVEL", default_level) |> String.to_existing_ato
 Logger.configure(level: log_level)
 
 # Also set test configuration
-Application.put_env(:parrot, :test_log_level, log_level)
-Application.put_env(:parrot, :test_sip_trace, sip_trace)
+Application.put_env(:parrot_platform, :test_log_level, log_level)
+Application.put_env(:parrot_platform, :test_sip_trace, sip_trace)
 
 Code.require_file("support/uas_handler.ex", __DIR__)
-Application.ensure_all_started(:parrot)
+Application.ensure_all_started(:parrot_platform)
+
+# Exclude slow tests by default (they cause long delays)
+# Run with: mix test --include sipp
+# Or specifically: mix test test/sipp/
+# Run integration tests with: mix test --include integration
+# Run slow tests with: mix test --include slow
+ExUnit.configure(exclude: [:sipp, :integration, :slow])
+
 ExUnit.start()

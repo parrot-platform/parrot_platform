@@ -37,103 +37,53 @@ defmodule Parrot.Sip.Dialog do
 
   alias Parrot.Sip.Message
   alias Parrot.Sip.Headers
+  alias Parrot.Sip.Headers.{From, To}
   alias Parrot.Sip.Uri
 
-  @doc """
-  Finds a dialog from the UAS perspective.
+  defstruct [
+    # Dialog ID string
+    :id,
+    # :early, :confirmed, :terminated
+    :state,
+    # Call-ID value
+    :call_id,
+    # Local tag parameter
+    :local_tag,
+    # Remote tag parameter
+    :remote_tag,
+    # Local URI as string
+    :local_uri,
+    # Remote URI as string
+    :remote_uri,
+    # Remote target URI as string
+    :remote_target,
+    # Local sequence number
+    :local_seq,
+    # Remote sequence number
+    :remote_seq,
+    # List of Route headers
+    :route_set,
+    # Boolean indicating if dialog is secure
+    :secure
+  ]
 
-  Checks if the incoming request matches an existing dialog by examining
-  the Call-ID, From tag, and To tag combination.
+  @type t :: %__MODULE__{
+          id: String.t(),
+          state: :early | :confirmed | :terminated,
+          call_id: String.t(),
+          local_tag: String.t(),
+          remote_tag: String.t(),
+          local_uri: String.t(),
+          remote_uri: String.t(),
+          remote_target: String.t(),
+          local_seq: non_neg_integer(),
+          remote_seq: non_neg_integer(),
+          route_set: list(),
+          secure: boolean()
+        }
 
-  RFC 3261 Section 12.2.2
 
-  ## Parameters
 
-  - `request`: The SIP request to find a matching dialog for
-
-  ## Returns
-
-  - `{:ok, dialog_handle}`: Dialog handle if found
-  - `:not_found`: If no matching dialog exists
-  """
-  @spec uas_find(Message.t()) :: {:ok, pid()} | :not_found
-  def uas_find(%Message{} = request) do
-    # Extract dialog identification components
-    call_id = request.headers["call-id"]
-    from_tag = request.headers["from"].parameters["tag"]
-    to_tag = request.headers["to"].parameters["tag"]
-
-    case {call_id, from_tag, to_tag} do
-      {call_id, from_tag, to_tag}
-      when is_binary(call_id) and is_binary(from_tag) and is_binary(to_tag) ->
-        # All components present, this could be an in-dialog request
-        # For now, assume no existing dialog is found until full dialog registry is implemented
-        # In full implementation: look up dialog in registry by dialog ID
-        :not_found
-
-      _ ->
-        # Missing components, definitely not an in-dialog request
-        :not_found
-    end
-  end
-
-  @doc """
-  Processes a UAS request in the context of dialogs.
-
-  Determines if this is an in-dialog request and handles it appropriately.
-  For out-of-dialog requests, allows normal processing to continue.
-
-  RFC 3261 Section 12.2.2
-
-  ## Parameters
-
-  - `request`: The SIP request to process
-
-  ## Returns
-
-  - `:process`: The request should be further processed
-  - `{:reply, response}`: A response that should be sent back immediately
-  """
-  @spec uas_request(Message.t()) :: :process | {:reply, Message.t()}
-  def uas_request(%Message{} = request) do
-    # Check if this is potentially an in-dialog request by looking for To tag
-    to_tag = request.headers["to"].parameters["tag"]
-
-    case to_tag do
-      nil ->
-        # No To tag means this is an initial request, continue processing
-        :process
-
-      _tag ->
-        # Has To tag, could be in-dialog request
-        # For now, still continue processing until full dialog implementation
-        # In full implementation: validate dialog exists, check sequence numbers
-        :process
-    end
-  end
-
-  @doc """
-  Prepares a UAS response with dialog information.
-
-  Adds dialog-related headers and information to responses that establish
-  or continue dialogs.
-
-  RFC 3261 Section 12.1.1
-
-  ## Parameters
-
-  - `response`: The SIP response to process
-  - `request`: The original SIP request
-
-  ## Returns
-
-  - The updated SIP response with dialog information
-  """
-  @spec uas_response(Message.t(), Message.t()) :: Message.t()
-  def uas_response(%Message{} = response, %Message{} = request) do
-    # Delegate to DialogStatem for stateful dialog management
-    Parrot.Sip.DialogStatem.uas_response(response, request)
-  end
 
   @doc """
   Facade function that creates a request within an existing dialog.
@@ -205,47 +155,202 @@ defmodule Parrot.Sip.Dialog do
     0
   end
 
-  defstruct [
-    # Dialog ID string
-    :id,
-    # :early, :confirmed, :terminated
-    :state,
-    # Call-ID value
-    :call_id,
-    # Local tag parameter
-    :local_tag,
-    # Remote tag parameter
-    :remote_tag,
-    # Local URI as string
-    :local_uri,
-    # Remote URI as string
-    :remote_uri,
-    # Remote target URI as string
-    :remote_target,
-    # Local sequence number
-    :local_seq,
-    # Remote sequence number
-    :remote_seq,
-    # List of Route headers
-    :route_set,
-    # Boolean indicating if dialog is secure
-    :secure
-  ]
+  @doc """
+  Creates a dialog ID with explicit components.
 
-  @type t :: %__MODULE__{
-          id: String.t(),
-          state: :early | :confirmed | :terminated,
-          call_id: String.t(),
-          local_tag: String.t(),
-          remote_tag: String.t(),
-          local_uri: String.t(),
-          remote_uri: String.t(),
-          remote_target: String.t(),
-          local_seq: non_neg_integer(),
-          remote_seq: non_neg_integer(),
-          route_set: list(),
-          secure: boolean()
+  ## Examples
+
+      iex> Parrot.Sip.Dialog.new("abc@example.com", "123", "456", :uac)
+      %{call_id: "abc@example.com", local_tag: "123", remote_tag: "456", direction: :uac}
+  """
+  @spec new(String.t(), String.t(), String.t() | nil, :uac | :uas) :: map()
+  def new(call_id, local_tag, remote_tag \\ nil, direction \\ :uac) do
+    %{
+      call_id: call_id,
+      local_tag: local_tag,
+      remote_tag: remote_tag,
+      direction: direction
+    }
+  end
+
+  @doc """
+  Creates a peer dialog ID by swapping local and remote tags.
+  This is useful for matching dialog IDs from different endpoints.
+
+  ## Examples
+
+      iex> dialog_id = %{call_id: "abc", local_tag: "123", remote_tag: "456", direction: :uac}
+      iex> Parrot.Sip.Dialog.peer_dialog_id(dialog_id)
+      %{call_id: "abc", local_tag: "456", remote_tag: "123", direction: :uas}
+  """
+  @spec peer_dialog_id(map()) :: map()
+  def peer_dialog_id(%{direction: direction} = dialog_id) do
+    peer_direction = if direction == :uac, do: :uas, else: :uac
+    
+    %{
+      call_id: dialog_id.call_id,
+      local_tag: dialog_id.remote_tag,
+      remote_tag: dialog_id.local_tag,
+      direction: peer_direction
+    }
+  end
+
+  @doc """
+  Compares two dialog IDs to determine if they match.
+  Two dialog IDs match if they have the same call-id and tags.
+
+  ## Examples
+
+      iex> dialog_id1 = %{call_id: "abc", local_tag: "123", remote_tag: "456"}
+      iex> dialog_id2 = %{call_id: "abc", local_tag: "123", remote_tag: "456"}
+      iex> Parrot.Sip.Dialog.match?(dialog_id1, dialog_id2)
+      true
+  """
+  @spec match?(map(), map()) :: boolean()
+  def match?(dialog_id1, dialog_id2) do
+    same_call_id = dialog_id1.call_id == dialog_id2.call_id
+
+    same_tags =
+      (dialog_id1.local_tag == dialog_id2.local_tag and
+         dialog_id1.remote_tag == dialog_id2.remote_tag) or
+        (dialog_id1.local_tag == dialog_id2.remote_tag and
+           dialog_id1.remote_tag == dialog_id2.local_tag)
+
+    same_call_id and same_tags
+  end
+
+  @doc """
+  Updates a dialog ID with a remote tag, typically used when receiving a response
+  that establishes a dialog.
+
+  ## Examples
+
+      iex> dialog_id = %{call_id: "abc", local_tag: "123", remote_tag: nil}
+      iex> Parrot.Sip.Dialog.with_remote_tag(dialog_id, "456")
+      %{call_id: "abc", local_tag: "123", remote_tag: "456"}
+  """
+  @spec with_remote_tag(map(), String.t()) :: map()
+  def with_remote_tag(dialog_id, remote_tag) when is_binary(remote_tag) do
+    %{dialog_id | remote_tag: remote_tag}
+  end
+
+  @doc """
+  Creates a dialog ID from a SIP message.
+
+  For requests, the dialog ID is created from the From tag, To tag (if present),
+  and Call-ID. For responses, the dialog ID is created from the To tag, From tag,
+  and Call-ID.
+
+  The direction is determined by the message type. For requests, the direction is
+  :uac (User Agent Client). For responses, the direction is :uas (User Agent Server).
+
+  ## Examples
+
+      iex> request = %Parrot.Sip.Message{type: :request, direction: :incoming, headers: %{
+      ...>   "from" => %Parrot.Sip.Headers.From{parameters: %{"tag" => "123"}},
+      ...>   "to" => %Parrot.Sip.Headers.To{parameters: %{}},
+      ...>   "call-id" => "abc@example.com"
+      ...> }}
+      iex> Parrot.Sip.Dialog.from_message(request)
+      %{call_id: "abc@example.com", local_tag: "123", remote_tag: nil, direction: :uas}
+  """
+  @spec from_message(Message.t()) :: map()
+  def from_message(%Message{type: type, direction: flow_direction} = message) do
+    call_id = Message.get_header(message, "call-id")
+    from_header = Message.get_header(message, "from")
+    to_header = Message.get_header(message, "to")
+
+    from_tag = if from_header, do: From.tag(from_header), else: nil
+    to_tag = if to_header, do: To.tag(to_header), else: nil
+
+    # Determine dialog direction based on message type and flow direction
+    dialog_direction =
+      case {type, flow_direction} do
+        {:request, :outgoing} -> :uac
+        {:request, :incoming} -> :uas
+        {:response, :outgoing} -> :uac
+        {:response, :incoming} -> :uas
+        _ -> :uac
+      end
+
+    case type do
+      :request ->
+        %{
+          call_id: call_id,
+          local_tag: from_tag,
+          remote_tag: to_tag,
+          direction: dialog_direction
         }
+
+      :response ->
+        %{
+          call_id: call_id,
+          local_tag: to_tag,
+          remote_tag: from_tag,
+          direction: dialog_direction
+        }
+
+      _ ->
+        # Default to request behavior for messages with nil or unknown type
+        %{
+          call_id: call_id,
+          local_tag: from_tag,
+          remote_tag: to_tag,
+          direction: dialog_direction
+        }
+    end
+  end
+
+  @doc """
+  Checks if a dialog ID is complete (has both local and remote tags).
+
+  ## Examples
+
+      iex> dialog_id = %{call_id: "abc", local_tag: "123", remote_tag: "456"}
+      iex> Parrot.Sip.Dialog.is_complete?(dialog_id)
+      true
+
+      iex> dialog_id = %{call_id: "abc", local_tag: "123", remote_tag: nil}
+      iex> Parrot.Sip.Dialog.is_complete?(dialog_id)
+      false
+  """
+  @spec is_complete?(map() | t()) :: boolean()
+  def is_complete?(%__MODULE__{local_tag: local_tag, remote_tag: remote_tag}) do
+    not is_nil(local_tag) and not is_nil(remote_tag)
+  end
+
+  def is_complete?(%{local_tag: local_tag, remote_tag: remote_tag}) do
+    not is_nil(local_tag) and not is_nil(remote_tag)
+  end
+
+  @doc """
+  Converts a dialog ID to a string representation for Registry lookups.
+  
+  This unifies the previous DialogId.to_string/1 and Dialog.generate_id/4 functions
+  into a single consistent format.
+
+  ## Examples
+
+      iex> dialog = %Parrot.Sip.Dialog{call_id: "abc", local_tag: "123", remote_tag: "456", ...}
+      iex> Parrot.Sip.Dialog.to_string(dialog)
+      "abc;local=123;remote=456"
+
+      iex> dialog_id = %{call_id: "abc", local_tag: "123", remote_tag: "456", direction: :uac}
+      iex> Parrot.Sip.Dialog.to_string(dialog_id)
+      "abc;local=123;remote=456;uac"
+  """
+  @spec to_string(t() | map()) :: String.t()
+  def to_string(%__MODULE__{call_id: call_id, local_tag: local_tag, remote_tag: remote_tag}) do
+    remote_part = if remote_tag, do: ";remote=#{remote_tag}", else: ""
+    "#{call_id};local=#{local_tag}#{remote_part}"
+  end
+
+  def to_string(%{call_id: call_id, local_tag: local_tag, remote_tag: remote_tag} = dialog_id) do
+    remote_part = if remote_tag, do: ";remote=#{remote_tag}", else: ""
+    direction_part = if Map.has_key?(dialog_id, :direction), do: ";#{dialog_id.direction}", else: ""
+    "#{call_id};local=#{local_tag}#{remote_part}#{direction_part}"
+  end
+
 
   @doc """
   Creates a dialog from the UAS perspective.
@@ -392,6 +497,8 @@ defmodule Parrot.Sip.Dialog do
   @doc """
   Generates a dialog ID based on the dialog parameters.
 
+  This now uses the unified to_string/1 approach for consistency.
+
   ## Parameters
 
   - `perspective`: Either `:uac` or `:uas`
@@ -404,11 +511,14 @@ defmodule Parrot.Sip.Dialog do
   - A string representing the dialog ID
   """
   @spec generate_id(atom(), String.t(), String.t(), String.t()) :: String.t()
-  def generate_id(_perspective, call_id, local_tag, remote_tag) do
-    # Dialog ID is a combination of call-id and tags
-    # We need to use a consistent format regardless of perspective
-    # We'll use a canonical format: call-id:from-tag:to-tag
-    "#{call_id}:#{local_tag}:#{remote_tag}"
+  def generate_id(perspective, call_id, local_tag, remote_tag) do
+    # Use the unified to_string/1 function for consistency
+    __MODULE__.to_string(%{
+      call_id: call_id,
+      local_tag: local_tag,
+      remote_tag: remote_tag,
+      direction: perspective
+    })
   end
 
   @doc """

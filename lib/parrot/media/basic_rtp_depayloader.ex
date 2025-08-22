@@ -1,7 +1,8 @@
-defmodule Parrot.Media.SimpleRTPReceiver do
+defmodule Parrot.Media.BasicRTPDepayloader do
   @moduledoc """
-  A simple RTP receiver that extracts audio payload from RTP packets.
-  This bypasses the complexity of the RTP SessionBin for basic G.711 audio.
+  A basic RTP depayloader that extracts audio payload from RTP packets.
+  This bypasses the complexity of the RTP SessionBin for simple use cases
+  where you just need to extract G.711 audio from RTP packets.
   """
 
   use Membrane.Filter
@@ -64,7 +65,7 @@ defmodule Parrot.Media.SimpleRTPReceiver do
   @impl true
   def handle_buffer(:input, buffer, _ctx, state) do
     require Logger
-    Logger.debug("SimpleRTPReceiver got buffer, size: #{byte_size(buffer.payload)}")
+    Logger.debug("BasicRTPDepayloader got buffer, size: #{byte_size(buffer.payload)}")
 
     # Parse RTP packet
     case parse_rtp_packet(buffer.payload) do

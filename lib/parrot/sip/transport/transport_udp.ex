@@ -168,13 +168,13 @@ defmodule Parrot.Sip.Transport.Udp do
   end
 
   def handle_call(request, _from, state) do
-    Logger.error("udp port: unexpected call: #{inspect(request)}")
+    Logger.warning("udp port: unexpected call: #{inspect(request)}")
     {:reply, {:error, {:unexpected_call, request}}, state}
   end
 
   @impl true
   def handle_cast(request, state) do
-    Logger.error("udp port: unexpected cast: #{inspect(request)}")
+    Logger.warning("udp port: unexpected cast: #{inspect(request)}")
     {:noreply, state}
   end
 
@@ -194,7 +194,7 @@ defmodule Parrot.Sip.Transport.Udp do
   end
 
   def handle_info(msg, state) do
-    Logger.error("udp port: unexpected info: #{inspect(msg)}")
+    Logger.warning("udp port: unexpected info: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -214,16 +214,11 @@ defmodule Parrot.Sip.Transport.Udp do
 
   # Internal implementation
 
-  # Helper to log with handler-specified level
-  defp log(state, level, message) do
-    # Get log level from handler if available
-    configured_level =
-      case state.handler do
-        %{log_level: handler_level} when not is_nil(handler_level) -> handler_level
-        _ -> level
-      end
-
-    Logger.log(configured_level, message)
+  # Helper to log with appropriate level
+  # The handler's log_level acts as a minimum threshold, not an override
+  defp log(_state, level, message) do
+    # Use the intended level - handler's log_level is handled by Logger configuration
+    Logger.log(level, message)
   end
 
   @spec recv_message(:inet.ip_address(), :inet.port_number(), binary(), State.t()) :: :ok

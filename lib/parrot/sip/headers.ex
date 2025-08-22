@@ -9,7 +9,7 @@ defmodule Parrot.Sip.Headers do
   alias Parrot.Sip.{
     Method,
     Branch,
-    DialogId,
+    Dialog,
     MethodSet
   }
 
@@ -589,39 +589,39 @@ defmodule Parrot.Sip.Headers do
   @doc """
   Creates a dialog ID from a SIP message.
 
-  See `Parrot.Sip.DialogId.from_message/1`.
+  See `Parrot.Sip.Dialog.from_message/1`.
   """
-  defdelegate dialog_id_from_message(message), to: DialogId, as: :from_message
+  defdelegate dialog_id_from_message(message), to: Dialog, as: :from_message
 
   @doc """
   Creates a dialog ID with explicit components.
 
-  See `Parrot.Sip.DialogId.new/4`.
+  See `Parrot.Sip.Dialog.new/4`.
   """
   defdelegate new_dialog_id(call_id, local_tag, remote_tag \\ nil, direction \\ :uac),
-    to: DialogId,
+    to: Dialog,
     as: :new
 
   @doc """
   Checks if a dialog ID is complete.
 
-  See `Parrot.Sip.DialogId.is_complete?/1`.
+  See `Parrot.Sip.Dialog.is_complete?/1`.
   """
-  defdelegate is_dialog_complete?(dialog_id), to: DialogId, as: :is_complete?
+  defdelegate is_dialog_complete?(dialog_id), to: Dialog, as: :is_complete?
 
   @doc """
   Creates a peer dialog ID by swapping local and remote tags.
 
-  See `Parrot.Sip.DialogId.peer_dialog_id/1`.
+  See `Parrot.Sip.Dialog.peer_dialog_id/1`.
   """
-  defdelegate peer_dialog_id(dialog_id), to: DialogId, as: :peer_dialog_id
+  defdelegate peer_dialog_id(dialog_id), to: Dialog, as: :peer_dialog_id
 
   @doc """
   Compares two dialog IDs to determine if they match.
 
-  See `Parrot.Sip.DialogId.match?/2`.
+  See `Parrot.Sip.Dialog.match?/2`.
   """
-  defdelegate dialog_ids_match?(dialog_id1, dialog_id2), to: DialogId, as: :match?
+  defdelegate dialog_ids_match?(dialog_id1, dialog_id2), to: Dialog, as: :match?
 
   @doc """
   Creates a new method set.

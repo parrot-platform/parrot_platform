@@ -11,6 +11,7 @@ defmodule Parrot.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       releases: releases(),
       aliases: aliases(),
+      preferred_cli_env: preferred_cli_env(),
 
       # Hex.pm metadata
       name: "Parrot Platform",
@@ -27,6 +28,14 @@ defmodule Parrot.MixProject do
   defp elixirc_paths(:dev), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
+  # Set preferred environments for custom mix tasks
+  defp preferred_cli_env do
+    [
+      "test.sipp": :test,
+      "test.all": :test
+    ]
+  end
+
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
@@ -41,18 +50,21 @@ defmodule Parrot.MixProject do
       {:nimble_parsec, "~> 1.3"},
       # Membrane Core and plugins
       {:membrane_core, "~> 1.0"},
-      {:membrane_rtp_plugin, "~> 0.27"},
-      {:membrane_rtp_format, "~> 0.10.0"},
+      {:membrane_rtp_plugin, "~> 0.31.0"},
+      {:membrane_rtp_format, "~> 0.11.0"},
       {:membrane_file_plugin, "~> 0.17"},
       {:membrane_udp_plugin, "~> 0.14"},
       {:membrane_g711_plugin, "~> 0.1"},
-      {:membrane_rtp_g711_plugin, "~> 0.3.0"},
+      {:membrane_rtp_g711_plugin,
+       github: "byoungdale/membrane_rtp_g711_plugin", branch: "byoungdale/update-rtp-format"},
       {:ex_sdp, "~> 0.17.0"},
       {:membrane_wav_plugin, "~> 0.10"},
       {:membrane_mp3_mad_plugin, "~> 0.18"},
       {:membrane_ffmpeg_swresample_plugin, "~> 0.20"},
       {:membrane_realtimer_plugin, "~> 0.10.1"},
       {:membrane_portaudio_plugin, "~> 0.19.2"},
+      {:membrane_opus_plugin, "~> 0.20.3"},
+      {:membrane_rtp_opus_plugin, "~> 0.10.1"},
 
       # Documentation
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
@@ -72,19 +84,46 @@ defmodule Parrot.MixProject do
     [
       test: ["test"],
       "test.sipp": &run_sipp_tests/1,
+      "test.all": &run_all_tests/1,
       docs: ["docs", &copy_images/1]
     ]
   end
 
-  defp run_sipp_tests(_) do
+  defp run_sipp_tests(args) do
     # Check if SIPP is installed
     case System.find_executable("sipp") do
       nil ->
-        Mix.raise("SIPP is not installed. Please install it first.")
+        Mix.shell().error("""
+        SIPp is not installed or not in PATH.
+        
+        Please install SIPp:
+          - macOS: brew install sipp
+          - Ubuntu/Debian: apt-get install sipp
+          - RHEL/CentOS: yum install sipp
+        """)
+        exit({:shutdown, 1})
 
       _path ->
-        Mix.Task.run("test", ["test/sipp/test_scenarios.exs"])
+        Mix.shell().info("Running SIPp integration tests...")
+        # Run the SIPp test file directly with sipp tag included
+        Mix.Task.run("test", ["test/sipp/test_scenarios.exs", "--include", "sipp" | args])
     end
+  end
+
+  defp run_all_tests(args) do
+    Mix.shell().info("Running ALL tests (including SIPp and slow tests)...")
+    Mix.shell().info("This may take a while...")
+    
+    # Check if SIPp is installed for those tests
+    unless System.find_executable("sipp") do
+      Mix.shell().warning("""
+      Warning: SIPp is not installed. SIPp tests may fail.
+      Install with: brew install sipp (macOS) or apt-get install sipp (Linux)
+      """)
+    end
+    
+    # Run all tests with excluded tags included
+    Mix.Task.run("test", ["--include", "sipp", "--include", "slow" | args])
   end
 
   defp copy_images(_) do

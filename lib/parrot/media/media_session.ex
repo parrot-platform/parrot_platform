@@ -526,8 +526,8 @@ defmodule Parrot.Media.MediaSession do
 
   # Codec mapping between symbols and RTP payload types
   # Codec mapping - using standard SDP names
-  defp codec_info(:pcma), do: {8, "PCMA/8000", Parrot.Media.MembraneAlawPipeline}
-  defp codec_info(:opus), do: {111, "opus/48000/2", Parrot.Media.RtpPipeline}
+  defp codec_info(:pcma), do: {8, "PCMA/8000", Parrot.Media.AlawPipeline}
+  defp codec_info(:opus), do: {111, "opus/48000/2", Parrot.Media.OpusPipeline}
 
   defp get_codec_payload_type(codec) do
     {pt, _, _} = codec_info(codec)
@@ -975,7 +975,7 @@ defmodule Parrot.Media.MediaSession do
         # RtpPipeline is a GenServer
         GenServer.start_link(pipeline_module, init_arg)
       else
-        # MembraneAlawPipeline uses Membrane.Pipeline
+        # AlawPipeline uses Membrane.Pipeline
         Membrane.Pipeline.start_link(pipeline_module, init_arg)
       end
 

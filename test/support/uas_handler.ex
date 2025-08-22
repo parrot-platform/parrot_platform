@@ -5,7 +5,7 @@ defmodule ParrotSupport.UasHandler do
 
   alias Parrot.Media.MediaSessionSupervisor
   alias Parrot.Media.MediaSession
-  alias Parrot.Sip.DialogId
+  alias Parrot.Sip.Dialog
 
   # Use process dictionary to store media session mappings
   # In production, consider using Registry or ETS
@@ -33,8 +33,8 @@ defmodule ParrotSupport.UasHandler do
     Logger.info("[UasHandler] Received INVITE request")
 
     # Extract dialog ID from request
-    dialog_id = DialogId.from_message(request)
-    dialog_id_str = DialogId.to_string(dialog_id)
+    dialog_id = Dialog.from_message(request)
+    dialog_id_str = Dialog.to_string(dialog_id)
 
     Logger.info("[UasHandler] Dialog ID: #{dialog_id_str}")
 
@@ -106,8 +106,8 @@ defmodule ParrotSupport.UasHandler do
     Logger.info("[UasHandler] Received BYE request")
 
     # Get dialog ID from request
-    dialog_id = DialogId.from_message(request)
-    _dialog_id_str = DialogId.to_string(dialog_id)
+    dialog_id = Dialog.from_message(request)
+    _dialog_id_str = Dialog.to_string(dialog_id)
 
     # Get media session ID from Registry
     case Registry.lookup(Parrot.Registry, {:media_session, dialog_id.call_id}) do
@@ -138,8 +138,8 @@ defmodule ParrotSupport.UasHandler do
     Logger.info("[UasHandler] Received ACK request")
 
     # Get dialog ID from request
-    dialog_id = DialogId.from_message(request)
-    _dialog_id_str = DialogId.to_string(dialog_id)
+    dialog_id = Dialog.from_message(request)
+    _dialog_id_str = Dialog.to_string(dialog_id)
 
     # Get media session ID from Registry
     case Registry.lookup(Parrot.Registry, {:media_session, dialog_id.call_id}) do

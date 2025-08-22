@@ -40,12 +40,13 @@ Get started with the Parrot Platform by follow the instructions at https://hexdo
 ### Brandon's Notes
 
 Next steps:
-- [ ] Add git push hook check for mix format
-- [ ] Get github actions working / CICD passing
-- [ ] add OPUS support to uas and uac examples and generators
-- [ ] create proper silence generator for scenarios where we need it
-- [ ] better pattern matching in media modules
-- [ ] better pattern matching in examples/generators
+- [x] Add git push hook check for mix format
+- [x] Get github actions working / CICD passing
+- [x] add OPUS support to uas and uac examples and generators
+- [x] create proper silence generator for scenarios where we need it
+- [x] better pattern matching in media modules
+- [x] better pattern matching in examples/generators
+- [ ] refactor media session api to have callbacks :handle_info to play files
 - [ ] verify transactions and dialogs do not return responses when they should not from handlers
 - [ ] implement B2BUA and media "bridge"-ing
 - [ ] load test

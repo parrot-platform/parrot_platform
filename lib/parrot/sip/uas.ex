@@ -8,7 +8,7 @@ defmodule Parrot.Sip.UAS do
   """
 
   alias Parrot.Sip.Transaction
-  alias Parrot.Sip.Dialog
+  alias Parrot.Sip.DialogStatem
   alias Parrot.Sip.Handler
   alias Parrot.Sip.TransactionStatem
   alias Parrot.Sip.Message
@@ -28,8 +28,8 @@ defmodule Parrot.Sip.UAS do
       fn sip_msg ->
         Logger.debug("UAS: process_request #{inspect(sip_msg.method)}")
 
-        # Dialog.uas_request currently only returns :process
-        Dialog.uas_request(sip_msg)
+        # Check if this is an in-dialog request
+        DialogStatem.uas_request(sip_msg)
         Logger.debug("UAS: process_request process #{inspect(sip_msg.method)}")
         {:process, sip_msg}
       end,
@@ -54,10 +54,13 @@ defmodule Parrot.Sip.UAS do
 
   @spec process_ack(Message.t(), Handler.handler()) :: :ok
   def process_ack(req_sip_msg, _handler) do
-    # Dialog.uas_find currently always returns :not_found
-    Dialog.uas_find(req_sip_msg)
-    require Logger
-    Logger.warning("uas: cannot find dialog for ACK")
+    # Try to find dialog for ACK
+    case DialogStatem.uas_find(req_sip_msg) do
+      {:ok, _dialog} ->
+        Logger.debug("uas: found dialog for ACK")
+      :not_found ->
+        Logger.debug("uas: cannot find dialog for ACK")
+    end
     :ok
   end
 
@@ -71,7 +74,7 @@ defmodule Parrot.Sip.UAS do
   @spec response(Message.t(), Transaction.t()) :: :ok
   def response(resp_sip_msg0, %Transaction{request: req_sip_msg} = transaction) do
     Logger.debug("UAS: response #{inspect(resp_sip_msg0.method)}")
-    resp_sip_msg = Dialog.uas_response(resp_sip_msg0, req_sip_msg)
+    resp_sip_msg = DialogStatem.uas_response(resp_sip_msg0, req_sip_msg)
     TransactionStatem.server_response(resp_sip_msg, transaction)
   end
 

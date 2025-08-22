@@ -125,8 +125,8 @@ defmodule Parrot.Media.MediaSessionAudioTest do
       {:ok, _answer} = MediaSession.process_offer(pid, sdp_offer)
 
       {_state_name, data} = :sys.get_state(pid)
-      # Should use the codec-specific pipeline (MembraneAlawPipeline for PCMA)
-      assert data.pipeline_module == Parrot.Media.MembraneAlawPipeline
+      # Should use the codec-specific pipeline (AlawPipeline for PCMA)
+      assert data.pipeline_module == Parrot.Media.AlawPipeline
 
       MediaSession.terminate_session(pid)
     end

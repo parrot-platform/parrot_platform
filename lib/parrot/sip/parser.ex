@@ -268,7 +268,7 @@ defmodule Parrot.Sip.Parser do
     dialog_id =
       try do
         Logger.debug("Getting dialog_id from message")
-        Parrot.Sip.DialogId.from_message(base_message)
+        Parrot.Sip.Dialog.from_message(base_message)
       rescue
         _ -> nil
       end

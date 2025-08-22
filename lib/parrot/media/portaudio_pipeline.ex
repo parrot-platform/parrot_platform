@@ -73,13 +73,14 @@ defmodule Parrot.Media.PortAudioPipeline do
       device_id = Map.get(state, :output_device_id)
 
       # Select appropriate depayloader and decoder based on payload type
-      {depayloader, decoder} =
+      {depayloader, decoder_spec} =
         case pt do
           8 ->
             {Membrane.RTP.G711.Depayloader, Membrane.G711.Decoder}
 
           111 ->
-            {Membrane.RTP.Opus.Depayloader, Membrane.Opus.Decoder}
+            # Explicitly set sample rate for Opus decoder
+            {Membrane.RTP.Opus.Depayloader, %Membrane.Opus.Decoder{sample_rate: 48_000}}
 
           _ ->
             Logger.warning("Unsupported payload type #{pt}, defaulting to G.711 A-law")
@@ -91,7 +92,7 @@ defmodule Parrot.Media.PortAudioPipeline do
         |> via_out(Pad.ref(:output, ssrc),
           options: [depayloader: depayloader]
         )
-        |> child({:decoder, ssrc}, decoder)
+        |> child({:decoder, ssrc}, decoder_spec)
         |> then(fn builder ->
           # Only add resampler for G.711 (8kHz -> 48kHz)
           # Opus already outputs at 48kHz
@@ -192,8 +193,10 @@ defmodule Parrot.Media.PortAudioPipeline do
   defp build_rtp_session do
     child(:rtp, %Membrane.RTP.SessionBin{
       fmt_mapping: %{
-        # G.711 A-law only (Opus send not implemented)
-        8 => {:PCMA, 8000}
+        # G.711 A-law
+        8 => {:PCMA, 8000},
+        # OPUS codec (dynamic encoding)
+        111 => {:opus, 48000}
       },
       # Send RTCP receiver reports
       rtcp_receiver_report_interval: Membrane.Time.seconds(5),
@@ -202,9 +205,50 @@ defmodule Parrot.Media.PortAudioPipeline do
     })
   end
 
+  # All build_source_pipeline/5 clauses grouped together
   defp build_source_pipeline(:device, opts, ssrc, _udp, _rtp) do
     device_id = opts[:input_device_id]
+    selected_codec = opts[:selected_codec] || :pcma
 
+    case selected_codec do
+      :opus ->
+        build_opus_source_pipeline(device_id, ssrc)
+
+      _ ->
+        build_pcma_source_pipeline(device_id, ssrc)
+    end
+  end
+
+  defp build_source_pipeline(:file, opts, ssrc, _udp, _rtp) do
+    selected_codec = opts[:selected_codec] || :pcma
+
+    case selected_codec do
+      :opus ->
+        build_opus_file_pipeline(opts, ssrc)
+
+      _ ->
+        build_pcma_file_pipeline(opts, ssrc)
+    end
+  end
+
+  defp build_source_pipeline(:silence, opts, ssrc, _udp, rtp) do
+    selected_codec = opts[:selected_codec] || :pcma
+
+    case selected_codec do
+      :opus ->
+        build_opus_silence_pipeline(ssrc, rtp)
+
+      _ ->
+        build_pcma_silence_pipeline(ssrc, rtp)
+    end
+  end
+
+  defp build_source_pipeline(source, _opts, _ssrc, _udp, _rtp) when source in [:none, nil] do
+    []
+  end
+
+  # Helper functions for build_source_pipeline
+  defp build_pcma_source_pipeline(device_id, ssrc) do
     [
       # Microphone input
       child(:mic_source, %PortAudio.Source{
@@ -225,7 +269,7 @@ defmodule Parrot.Media.PortAudioPipeline do
       }),
 
       # Convert to G.711 A-law
-      child(:g711_encoder, Membrane.G711.Encoder),
+      child(:g711_encoder, Parrot.Media.TimestampPreservingG711Encoder),
 
       # Chunk for RTP
       child(:g711_chunker, %G711Chunker{chunk_duration: 20}),
@@ -244,11 +288,45 @@ defmodule Parrot.Media.PortAudioPipeline do
       )
       |> get_child(:rtp)
       |> via_out(Pad.ref(:rtp_output, ssrc), options: [encoding: :PCMA])
+      |> via_in(:input)
       |> get_child(:udp_endpoint)
     ]
   end
 
-  defp build_source_pipeline(:file, opts, ssrc, _udp, _rtp) do
+  defp build_opus_source_pipeline(device_id, ssrc) do
+    [
+      # Microphone input (PortAudio captures at 48kHz by default)
+      child(:mic_source, %PortAudio.Source{
+        device_id: device_id || :default,
+        portaudio_buffer_size: 512,
+        latency: :high
+      }),
+
+      # OPUS encoder (expects 48kHz input)
+      child(:opus_encoder, %Membrane.Opus.Encoder{
+        application: :voip,
+        # 24 kbps for good voice quality
+        bitrate: 24_000
+      }),
+
+      # Add timing
+      child(:realtimer, Membrane.Realtimer),
+
+      # Links
+      get_child(:mic_source)
+      |> get_child(:opus_encoder)
+      |> get_child(:realtimer)
+      |> via_in(Pad.ref(:input, ssrc),
+        options: [payloader: Membrane.RTP.Opus.Payloader]
+      )
+      |> get_child(:rtp)
+      |> via_out(Pad.ref(:rtp_output, ssrc), options: [payload_type: 111])
+      |> via_in(:input)
+      |> get_child(:udp_endpoint)
+    ]
+  end
+
+  defp build_pcma_file_pipeline(opts, ssrc) do
     [
       # File source
       child(:file_source, %Membrane.File.Source{
@@ -257,9 +335,12 @@ defmodule Parrot.Media.PortAudioPipeline do
 
       # Parse WAV
       child(:wav_parser, Membrane.WAV.Parser),
+      
+      # Add timestamps to buffers from WAV parser
+      child(:timestamp_generator, Parrot.Media.TimestampGenerator),
 
       # Convert to G.711
-      child(:g711_encoder, Membrane.G711.Encoder),
+      child(:g711_encoder, Parrot.Media.TimestampPreservingG711Encoder),
 
       # Chunk for RTP
       child(:g711_chunker, %G711Chunker{chunk_duration: 20}),
@@ -270,6 +351,7 @@ defmodule Parrot.Media.PortAudioPipeline do
       # Links
       get_child(:file_source)
       |> get_child(:wav_parser)
+      |> get_child(:timestamp_generator)
       |> get_child(:g711_encoder)
       |> get_child(:g711_chunker)
       |> get_child(:realtimer)
@@ -278,18 +360,111 @@ defmodule Parrot.Media.PortAudioPipeline do
       )
       |> get_child(:rtp)
       |> via_out(Pad.ref(:rtp_output, ssrc), options: [encoding: :PCMA])
+      |> via_in(:input)
       |> get_child(:udp_endpoint)
     ]
   end
 
-  defp build_source_pipeline(:silence, _opts, _ssrc, _udp, _rtp) do
-    # For now, don't send anything when source is silence
-    # In the future, we could generate comfort noise
-    []
+  defp build_opus_file_pipeline(opts, ssrc) do
+    [
+      # File source
+      child(:file_source, %Membrane.File.Source{
+        location: opts.audio_file
+      }),
+
+      # Parse WAV
+      child(:wav_parser, Membrane.WAV.Parser),
+      
+      # Add timestamps to buffers from WAV parser
+      child(:timestamp_generator, Parrot.Media.TimestampGenerator),
+
+      # Resample to 48kHz for OPUS
+      child(:resampler, %Membrane.FFmpeg.SWResample.Converter{
+        output_stream_format: %Membrane.RawAudio{
+          sample_format: :s16le,
+          sample_rate: 48000,
+          channels: 2
+        }
+      }),
+
+      # OPUS encoder
+      child(:opus_encoder, %Membrane.Opus.Encoder{
+        application: :voip,
+        bitrate: 24_000
+      }),
+
+      # Add timing
+      child(:realtimer, Membrane.Realtimer),
+
+      # Links
+      get_child(:file_source)
+      |> get_child(:wav_parser)
+      |> get_child(:timestamp_generator)
+      |> get_child(:resampler)
+      |> get_child(:opus_encoder)
+      |> get_child(:realtimer)
+      |> via_in(Pad.ref(:input, ssrc),
+        options: [payloader: Membrane.RTP.Opus.Payloader]
+      )
+      |> get_child(:rtp)
+      |> via_out(Pad.ref(:rtp_output, ssrc), options: [payload_type: 111])
+      |> via_in(:input)
+      |> get_child(:udp_endpoint)
+    ]
   end
 
-  defp build_source_pipeline(source, _opts, _ssrc, _udp, _rtp) when source in [:none, nil] do
-    []
+  defp build_pcma_silence_pipeline(ssrc, _rtp) do
+    [
+      # Silence generator
+      child(:silence_source, %Parrot.Media.SilenceSource{
+        interval: 20,
+        sample_rate: 8000,
+        channels: 1
+      }),
+
+      # G.711 A-law encoder
+      child(:g711_encoder, Parrot.Media.TimestampPreservingG711Encoder),
+
+      # Connect the pipeline
+      get_child(:silence_source)
+      |> get_child(:g711_encoder)
+      |> via_in(Pad.ref(:input, ssrc),
+        options: [payloader: Membrane.RTP.G711.Payloader]
+      )
+      |> get_child(:rtp)
+      |> via_out(Pad.ref(:rtp_output, ssrc), options: [encoding: :PCMA])
+      |> via_in(:input)
+      |> get_child(:udp_endpoint)
+    ]
+  end
+
+  defp build_opus_silence_pipeline(ssrc, _rtp) do
+    [
+      # Silence generator for OPUS (48kHz)
+      child(:silence_source, %Parrot.Media.SilenceSource{
+        interval: 20,
+        sample_rate: 48000,
+        # OPUS expects stereo
+        channels: 2
+      }),
+
+      # OPUS encoder
+      child(:opus_encoder, %Membrane.Opus.Encoder{
+        application: :voip,
+        bitrate: 24_000
+      }),
+
+      # Connect the pipeline
+      get_child(:silence_source)
+      |> get_child(:opus_encoder)
+      |> via_in(Pad.ref(:input, ssrc),
+        options: [payloader: Membrane.RTP.Opus.Payloader]
+      )
+      |> get_child(:rtp)
+      |> via_out(Pad.ref(:rtp_output, ssrc), options: [payload_type: 111])
+      |> via_in(:input)
+      |> get_child(:udp_endpoint)
+    ]
   end
 
   defp build_sink_pipeline(:device, _opts, _udp, _rtp) do
@@ -307,8 +482,8 @@ defmodule Parrot.Media.PortAudioPipeline do
 
   defp build_sink_pipeline(:file, opts, _udp, _rtp) do
     [
-      # Custom RTP receiver that extracts audio from RTP packets
-      child(:rtp_receiver, %Parrot.Media.SimpleRTPReceiver{
+      # Basic RTP depayloader that extracts audio from RTP packets
+      child(:rtp_receiver, %Parrot.Media.BasicRTPDepayloader{
         clock_rate: 8000,
         selected_codec: opts[:selected_codec]
       }),
@@ -335,7 +510,16 @@ defmodule Parrot.Media.PortAudioPipeline do
   end
 
   defp build_sink_pipeline(sink, _opts, _udp, _rtp) when sink in [:none, nil] do
-    []
+    # Even when we don't want to process received audio, we need to connect
+    # the UDP endpoint's output pad to something. Use a Fake sink that drops all data.
+    [
+      child(:fake_sink, %Membrane.Debug.Sink{}),
+      
+      # Connect UDP output to fake sink to satisfy pad requirements
+      get_child(:udp_endpoint)
+      |> via_out(:output)
+      |> get_child(:fake_sink)
+    ]
   end
 
   defp parse_ip!(ip_string) when is_binary(ip_string) do

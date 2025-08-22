@@ -1,0 +1,21 @@
+#!/bin/sh
+# Pre-push hook to check code formatting
+
+echo "Running mix format check before push..."
+
+# Check if mix is available
+if ! command -v mix &> /dev/null; then
+    echo "Error: 'mix' command not found. Please ensure Elixir is installed."
+    exit 1
+fi
+
+# Run mix format check
+if ! mix format --check-formatted; then
+    echo ""
+    echo "Error: Code is not properly formatted."
+    echo "Please run 'mix format' to fix formatting issues before pushing."
+    exit 1
+fi
+
+echo "✓ Code formatting check passed"
+exit 0

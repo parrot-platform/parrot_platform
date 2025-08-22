@@ -1,4 +1,4 @@
-defmodule Parrot.Media.MembraneAlawPipeline do
+defmodule Parrot.Media.AlawPipeline do
   @moduledoc """
   Membrane pipeline for G.711 A-law RTP streaming.
   Uses the official Membrane G711 encoder (A-law) and RTP payloader.
@@ -6,10 +6,12 @@ defmodule Parrot.Media.MembraneAlawPipeline do
 
   use Membrane.Pipeline
   require Logger
+  
+  import Parrot.Media.PipelineHelpers
 
   @impl true
   def handle_init(_ctx, opts) do
-    Logger.info("MembraneAlawPipeline: Starting for session #{opts.session_id}")
+    Logger.info("AlawPipeline: Starting for session #{opts.session_id}")
     Logger.info("  Audio file: #{inspect(opts.audio_file)}")
 
     # Check if file exists and get its size (only for actual file paths)
@@ -28,34 +30,15 @@ defmodule Parrot.Media.MembraneAlawPipeline do
 
     # Generate SSRC once for consistency
     ssrc = :rand.uniform(0xFFFFFFFF)
+    has_audio? = has_audio_file?(opts)
 
     # Create bidirectional UDP endpoint
-    udp_endpoint_spec =
-      if opts.audio_file && opts.audio_file != :default_audio do
-        # Full bidirectional endpoint when we have audio to send
-        child(:udp_endpoint, %Membrane.UDP.Endpoint{
-          local_port_no: opts.local_rtp_port,
-          destination_port_no: opts.remote_rtp_port,
-          destination_address:
-            case parse_ip(opts.remote_rtp_address) do
-              {:ok, ip} ->
-                ip
-
-              {:error, reason} ->
-                raise "Invalid remote RTP address: #{inspect(opts.remote_rtp_address)}, reason: #{inspect(reason)}"
-            end
-        })
-      else
-        # Receive-only endpoint when no audio to send
-        child(:udp_endpoint, %Membrane.UDP.Source{
-          local_port_no: opts.local_rtp_port
-        })
-      end
+    udp_endpoint_spec = build_udp_endpoint_spec(opts, has_audio?)
 
     # Create RTP SessionBin for bidirectional RTP handling
     rtp_session_spec =
       child(:rtp, %Membrane.RTP.SessionBin{
-        # payload type 8 = G.711 A-law
+        # payload type 8 = G.711 A-law (static encoding uses string format)
         fmt_mapping: %{8 => {"PCMA", 8000}}
       })
 
@@ -68,7 +51,7 @@ defmodule Parrot.Media.MembraneAlawPipeline do
 
     # Create sending pipeline components
     send_children_spec =
-      if opts.audio_file && opts.audio_file != :default_audio do
+      if has_audio? do
         [
           # Source - read WAV file
           child(:file_source, %Membrane.File.Source{
@@ -87,11 +70,7 @@ defmodule Parrot.Media.MembraneAlawPipeline do
           child(:realtimer, Membrane.Realtimer),
           # RTP packet logger
           child(:rtp_debug, %Parrot.Media.RTPPacketLogger{
-            dest_info:
-              case parse_ip(opts.remote_rtp_address) do
-                {:ok, ip} -> "#{format_ip(ip)}:#{opts.remote_rtp_port}"
-                {:error, _} -> "invalid_ip:#{opts.remote_rtp_port}"
-              end
+            dest_info: "#{format_ip(opts.remote_rtp_address)}:#{opts.remote_rtp_port}"
           })
         ]
       else
@@ -100,7 +79,7 @@ defmodule Parrot.Media.MembraneAlawPipeline do
 
     # Sending pipeline links
     send_links_spec =
-      if opts.audio_file && opts.audio_file != :default_audio do
+      if has_audio? do
         [
           get_child(:file_source)
           |> get_child(:wav_parser)
@@ -136,12 +115,12 @@ defmodule Parrot.Media.MembraneAlawPipeline do
   @impl true
   def handle_element_start_of_stream(element, pad, _ctx, state) do
     Logger.debug(
-      "MembraneAlawPipeline #{state.session_id}: Start of stream on #{inspect(element)}:#{inspect(pad)}"
+      "AlawPipeline #{state.session_id}: Start of stream on #{inspect(element)}:#{inspect(pad)}"
     )
 
     case element do
       :udp_endpoint ->
-        Logger.info("MembraneAlawPipeline #{state.session_id}: Started streaming")
+        Logger.info("AlawPipeline #{state.session_id}: Started streaming")
         Logger.info("  Streaming RTP to #{inspect(get_in(state, [:udp_sink_config]))}")
 
       # Note: We could call a handler callback here when playback starts,
@@ -149,12 +128,12 @@ defmodule Parrot.Media.MembraneAlawPipeline do
 
       :file_source ->
         Logger.info(
-          "MembraneAlawPipeline #{state.session_id}: File source started reading #{state.audio_file}"
+          "AlawPipeline #{state.session_id}: File source started reading #{state.audio_file}"
         )
 
       :realtimer ->
         Logger.debug(
-          "MembraneAlawPipeline #{state.session_id}: Realtimer ready - streaming at realtime pace"
+          "AlawPipeline #{state.session_id}: Realtimer ready - streaming at realtime pace"
         )
 
       _ ->
@@ -168,35 +147,35 @@ defmodule Parrot.Media.MembraneAlawPipeline do
   @impl true
   def handle_element_end_of_stream(element, pad, _ctx, state) do
     Logger.debug(
-      "MembraneAlawPipeline #{state.session_id}: End of stream on #{inspect(element)}:#{inspect(pad)}"
+      "AlawPipeline #{state.session_id}: End of stream on #{inspect(element)}:#{inspect(pad)}"
     )
 
     # Log specific elements for debugging
     case element do
       :file_source ->
-        Logger.info("MembraneAlawPipeline #{state.session_id}: File source finished reading")
+        Logger.info("AlawPipeline #{state.session_id}: File source finished reading")
         {[], state}
 
       :realtimer ->
-        Logger.info("MembraneAlawPipeline #{state.session_id}: Realtimer finished processing")
+        Logger.info("AlawPipeline #{state.session_id}: Realtimer finished processing")
         {[], state}
 
       :udp_endpoint ->
-        Logger.info("MembraneAlawPipeline #{state.session_id}: Finished streaming")
+        Logger.info("AlawPipeline #{state.session_id}: Finished streaming")
 
         # The MediaHandler behaviour uses handle_play_complete, not handle_playback_completed
         if state.media_handler do
           case state.media_handler.handle_play_complete(state.audio_file, state.handler_state) do
             {{:play, next_file}, new_handler_state} ->
               Logger.info(
-                "MembraneAlawPipeline #{state.session_id}: Handler requested next file: #{next_file}"
+                "AlawPipeline #{state.session_id}: Handler requested next file: #{next_file}"
               )
 
               # TODO: Implement dynamic file switching
               {[terminate: :normal], %{state | handler_state: new_handler_state}}
 
             {:stop, new_handler_state} ->
-              Logger.info("MembraneAlawPipeline #{state.session_id}: Handler requested stop")
+              Logger.info("AlawPipeline #{state.session_id}: Handler requested stop")
               {[terminate: :normal], %{state | handler_state: new_handler_state}}
 
             _ ->
@@ -209,7 +188,7 @@ defmodule Parrot.Media.MembraneAlawPipeline do
       element_name ->
         # Handle end of stream for other elements
         Logger.debug(
-          "MembraneAlawPipeline #{state.session_id}: End of stream for #{inspect(element_name)}"
+          "AlawPipeline #{state.session_id}: End of stream for #{inspect(element_name)}"
         )
 
         {[], state}
@@ -224,7 +203,7 @@ defmodule Parrot.Media.MembraneAlawPipeline do
         state
       ) do
     Logger.info(
-      "MembraneAlawPipeline #{state.session_id}: New incoming RTP stream with SSRC: #{ssrc}"
+      "AlawPipeline #{state.session_id}: New incoming RTP stream with SSRC: #{ssrc}"
     )
 
     Logger.debug("  Full notification: #{inspect(notification)}")
@@ -247,34 +226,5 @@ defmodule Parrot.Media.MembraneAlawPipeline do
     {[], state}
   end
 
-  defp parse_ip(ip) when is_binary(ip) do
-    case :inet.parse_address(String.to_charlist(ip)) do
-      {:ok, ip_tuple} -> {:ok, ip_tuple}
-      {:error, reason} -> {:error, {:invalid_ip_address, ip, reason}}
-    end
-  end
-
-  defp parse_ip(ip) when is_tuple(ip) and tuple_size(ip) == 4 do
-    # Validate IPv4 tuple
-    if Enum.all?(Tuple.to_list(ip), &(&1 >= 0 and &1 <= 255)) do
-      {:ok, ip}
-    else
-      {:error, {:invalid_ipv4_tuple, ip}}
-    end
-  end
-
-  defp parse_ip(ip) when is_tuple(ip) and tuple_size(ip) == 8 do
-    # Validate IPv6 tuple
-    if Enum.all?(Tuple.to_list(ip), &(&1 >= 0 and &1 <= 65535)) do
-      {:ok, ip}
-    else
-      {:error, {:invalid_ipv6_tuple, ip}}
-    end
-  end
-
-  defp parse_ip(ip), do: {:error, {:invalid_ip_format, ip}}
-
-  defp format_ip(ip) when is_binary(ip), do: ip
-  defp format_ip({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
-  defp format_ip(ip), do: inspect(ip)
+  # IP utilities are now imported from PipelineHelpers
 end
