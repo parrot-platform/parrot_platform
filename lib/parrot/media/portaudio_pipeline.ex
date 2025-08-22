@@ -27,7 +27,7 @@ defmodule Parrot.Media.PortAudioPipeline do
   require Logger
 
   alias Membrane.PortAudio
-  alias Parrot.Media.G711Chunker
+  alias Parrot.Media.{G711Chunker, RawAudioChunker}
 
   @impl true
   def handle_init(_ctx, opts) do
@@ -298,22 +298,34 @@ defmodule Parrot.Media.PortAudioPipeline do
       # Microphone input (PortAudio captures at 48kHz by default)
       child(:mic_source, %PortAudio.Source{
         device_id: device_id || :default,
-        portaudio_buffer_size: 512,
+        portaudio_buffer_size: 960,  # Match OPUS frame size: 20ms * 48kHz = 960 samples
         latency: :high
       }),
 
-      # OPUS encoder (expects 48kHz input)
+      # Add chunker to ensure consistent frame sizes BEFORE timestamp generation
+      # This ensures each buffer has exactly 960 samples (20ms)
+      child(:audio_chunker, %Parrot.Media.RawAudioChunker{
+        chunk_size: 960  # samples per chunk for 20ms at 48kHz mono
+      }),
+
+      # Add timestamp generator to create fresh, regular timestamps
+      # Now working with consistent chunk sizes
+      child(:timestamp_generator, Parrot.Media.TimestampGenerator),
+
+      # OPUS encoder (expects 48kHz input with regular timing)
       child(:opus_encoder, %Membrane.Opus.Encoder{
         application: :voip,
         # 24 kbps for good voice quality
         bitrate: 24_000
       }),
 
-      # Add timing
+      # Add realtimer after encoding
       child(:realtimer, Membrane.Realtimer),
 
       # Links
       get_child(:mic_source)
+      |> get_child(:audio_chunker)
+      |> get_child(:timestamp_generator)
       |> get_child(:opus_encoder)
       |> get_child(:realtimer)
       |> via_in(Pad.ref(:input, ssrc),
