@@ -106,20 +106,39 @@ defmodule Parrot.Media.RawAudioChunker do
   end
 
   @impl true
+  @doc """
+  Accumulates incoming audio data and outputs fixed-size chunks.
+  
+  This is the heart of the chunker. It:
+  1. Adds new data to our accumulator buffer
+  2. Extracts as many complete chunks as possible
+  3. Keeps leftover data for next time
+  4. Assigns monotonically increasing timestamps
+  
+  Example with 960-sample chunks (1920 bytes for 16-bit mono):
+  - Receive 512 samples (1024 bytes) → accumulator has 1024 bytes → no output
+  - Receive 1024 samples (2048 bytes) → accumulator has 3072 bytes → output 1 chunk, keep 1152 bytes
+  - Receive 256 samples (512 bytes) → accumulator has 1664 bytes → no output
+  - Receive 512 samples (1024 bytes) → accumulator has 2688 bytes → output 1 chunk, keep 768 bytes
+  """
   def handle_buffer(:input, %Buffer{payload: payload}, _ctx, state) do
+    # Add new data to what we already have
     accumulator = state.accumulator <> payload
 
+    # Extract as many fixed-size chunks as possible
     {buffers, rest, pts} =
       chunk_data(accumulator, state.bytes_per_chunk, state.pts, state.chunk_duration_ns, [])
 
+    # Update state with leftover data and new timestamp position
     state = %{state | accumulator: rest, pts: pts}
 
+    # Create output buffers with proper timestamps
     output_buffers =
       Enum.map(buffers, fn {chunk, chunk_pts} ->
         %Buffer{
           payload: chunk,
-          pts: chunk_pts,
-          dts: chunk_pts
+          pts: chunk_pts,     # Presentation timestamp
+          dts: chunk_pts      # Decode timestamp (same for audio)
         }
       end)
 
@@ -148,13 +167,21 @@ defmodule Parrot.Media.RawAudioChunker do
     {actions, state}
   end
 
-  # Recursively chunk the data
+  # Recursively extract fixed-size chunks from accumulated data
+  @doc false
+  # When we have enough data for at least one chunk, extract it and recurse
   defp chunk_data(data, chunk_size, pts, duration_ns, acc) when byte_size(data) >= chunk_size do
+    # Extract exactly chunk_size bytes
     <<chunk::binary-size(chunk_size), rest::binary>> = data
+    
+    # Recurse with remaining data, incrementing timestamp
+    # Each chunk gets a timestamp that's duration_ns later than the previous
     chunk_data(rest, chunk_size, pts + duration_ns, duration_ns, [{chunk, pts} | acc])
   end
 
+  # When we don't have enough data for a complete chunk, return what we have
   defp chunk_data(rest, _chunk_size, pts, _duration_ns, acc) do
+    # Return: extracted chunks (reversed for correct order), leftover data, next timestamp
     {Enum.reverse(acc), rest, pts}
   end
 
