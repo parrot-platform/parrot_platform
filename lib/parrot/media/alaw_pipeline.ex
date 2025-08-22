@@ -62,9 +62,10 @@ defmodule Parrot.Media.AlawPipeline do
           # Convert to G.711 A-law
           child(:g711_encoder, Membrane.G711.Encoder),
           # Chunk G.711 data into RTP-sized packets
-          child(:g711_chunker, %Parrot.Media.G711Chunker{
-            # 20ms packets
-            chunk_duration: 20
+          child(:g711_chunker, %Parrot.Media.AudioChunker{
+            # 20ms packets at 8kHz = 160 samples
+            chunk_duration_ms: 20,
+            sample_rate: 8000
           }),
           # Add realtimer to pace the audio
           child(:realtimer, Membrane.Realtimer),

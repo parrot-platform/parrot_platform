@@ -27,7 +27,7 @@ defmodule Parrot.Media.PortAudioPipeline do
   require Logger
 
   alias Membrane.PortAudio
-  alias Parrot.Media.{G711Chunker, RawAudioChunker}
+  alias Parrot.Media.AudioChunker
 
   @impl true
   def handle_init(_ctx, opts) do
@@ -271,8 +271,11 @@ defmodule Parrot.Media.PortAudioPipeline do
       # Convert to G.711 A-law
       child(:g711_encoder, Parrot.Media.TimestampPreservingG711Encoder),
 
-      # Chunk for RTP
-      child(:g711_chunker, %G711Chunker{chunk_duration: 20}),
+      # Chunk for RTP (G.711 at 8kHz, 20ms = 160 samples)
+      child(:g711_chunker, %AudioChunker{
+        chunk_duration_ms: 20,
+        sample_rate: 8000
+      }),
 
       # Add timing
       child(:realtimer, Membrane.Realtimer),
@@ -304,8 +307,8 @@ defmodule Parrot.Media.PortAudioPipeline do
 
       # Add chunker to ensure consistent frame sizes BEFORE timestamp generation
       # This ensures each buffer has exactly 960 samples (20ms)
-      child(:audio_chunker, %Parrot.Media.RawAudioChunker{
-        chunk_size: 960  # samples per chunk for 20ms at 48kHz mono
+      child(:audio_chunker, %AudioChunker{
+        chunk_samples: 960  # samples per chunk for 20ms at 48kHz mono
       }),
 
       # Add timestamp generator to create fresh, regular timestamps
@@ -354,8 +357,11 @@ defmodule Parrot.Media.PortAudioPipeline do
       # Convert to G.711
       child(:g711_encoder, Parrot.Media.TimestampPreservingG711Encoder),
 
-      # Chunk for RTP
-      child(:g711_chunker, %G711Chunker{chunk_duration: 20}),
+      # Chunk for RTP (G.711 at 8kHz, 20ms = 160 samples)
+      child(:g711_chunker, %AudioChunker{
+        chunk_duration_ms: 20,
+        sample_rate: 8000
+      }),
 
       # Add timing
       child(:realtimer, Membrane.Realtimer),
