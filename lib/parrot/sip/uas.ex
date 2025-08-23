@@ -58,9 +58,11 @@ defmodule Parrot.Sip.UAS do
     case DialogStatem.uas_find(req_sip_msg) do
       {:ok, _dialog} ->
         Logger.debug("uas: found dialog for ACK")
+
       :not_found ->
         Logger.debug("uas: cannot find dialog for ACK")
     end
+
     :ok
   end
 

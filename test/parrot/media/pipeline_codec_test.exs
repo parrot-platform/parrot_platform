@@ -31,7 +31,6 @@ defmodule Parrot.Media.PipelineCodecTest do
       # Pipeline will be automatically cleaned up by ExUnit supervisor
     end
 
-
     @tag :capture_log
     test "creates pipeline with PCMA codec for device source" do
       pipeline =
@@ -82,7 +81,6 @@ defmodule Parrot.Media.PipelineCodecTest do
       on_exit(fn -> File.rm(test_file) end)
     end
 
-
     @tag :capture_log
     test "creates pipeline with PCMA codec for silence source" do
       pipeline =
@@ -119,7 +117,6 @@ defmodule Parrot.Media.PipelineCodecTest do
       # This is tested implicitly through pipeline creation
       assert true
     end
-
 
     test "uses correct payload type for PCMA (8)" do
       _opts = %{

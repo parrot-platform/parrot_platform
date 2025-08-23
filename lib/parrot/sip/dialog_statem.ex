@@ -95,9 +95,11 @@ defmodule Parrot.Sip.DialogStatem do
     dialog_id = dialog.id
 
     Logger.info("dialog: initializing with ID #{inspect(dialog_id)}")
+
     case Registry.register(Parrot.Registry, dialog_id, nil) do
-      {:ok, _} -> 
+      {:ok, _} ->
         Logger.info("dialog: successfully registered with ID #{inspect(dialog_id)}")
+
       {:error, {:already_registered, _}} ->
         Logger.warning("dialog: already registered with ID #{inspect(dialog_id)}")
     end
@@ -184,16 +186,18 @@ defmodule Parrot.Sip.DialogStatem do
   def uas_find(%Message{} = req_sip_msg) do
     # Try to extract dialog ID from the message
     dialog_id = Dialog.from_message(req_sip_msg)
-    
+
     if Dialog.is_complete?(dialog_id) do
       dialog_id_str = Dialog.to_string(dialog_id)
       Logger.info("uas_find: looking for dialog with ID #{inspect(dialog_id_str)}")
       result = find_dialog(dialog_id_str)
+
       case result do
-        {:ok, pid} -> 
+        {:ok, pid} ->
           Logger.info("uas_find: found dialog #{inspect(dialog_id_str)} at PID #{inspect(pid)}")
           {:ok, pid}
-        {:error, :no_dialog} -> 
+
+        {:error, :no_dialog} ->
           Logger.warning("uas_find: dialog #{inspect(dialog_id_str)} not found in registry")
           :not_found
       end
@@ -216,7 +220,10 @@ defmodule Parrot.Sip.DialogStatem do
 
       case find_dialog(dialog_id_str) do
         {:error, :no_dialog} ->
-          Logger.debug("dialog #{uas_log_id(sip_msg)}: dialog not found (dialog tracking not yet implemented)")
+          Logger.debug(
+            "dialog #{uas_log_id(sip_msg)}: dialog not found (dialog tracking not yet implemented)"
+          )
+
           resp = Message.reply(sip_msg, 481, "Call/Transaction Does Not Exist")
           {:reply, resp}
 
@@ -250,7 +257,10 @@ defmodule Parrot.Sip.DialogStatem do
 
       case find_dialog(dialog_id_str) do
         {:error, :no_dialog} ->
-          Logger.debug("dialog #{uas_log_id(resp_sip_msg)}: dialog not found (dialog tracking not yet implemented)")
+          Logger.debug(
+            "dialog #{uas_log_id(resp_sip_msg)}: dialog not found (dialog tracking not yet implemented)"
+          )
+
           uas_maybe_create_dialog(resp_sip_msg, req_sip_msg)
 
         {:ok, dialog_pid} ->
@@ -318,11 +328,13 @@ defmodule Parrot.Sip.DialogStatem do
   @spec find_dialog(String.t()) :: {:ok, pid()} | {:error, :no_dialog}
   def find_dialog(dialog_id) do
     Logger.debug("find_dialog: searching for #{inspect(dialog_id)}")
+
     case Registry.lookup(Parrot.Registry, dialog_id) do
-      [{pid, _}] -> 
+      [{pid, _}] ->
         Logger.debug("find_dialog: found PID #{inspect(pid)} for #{inspect(dialog_id)}")
         {:ok, pid}
-      [] -> 
+
+      [] ->
         Logger.debug("find_dialog: no PID found for #{inspect(dialog_id)}")
         {:error, :no_dialog}
     end
@@ -546,7 +558,10 @@ defmodule Parrot.Sip.DialogStatem do
   defp uas_maybe_create_dialog(%Message{} = resp_sip_msg, %Message{} = req_sip_msg) do
     # Check if this response creates a dialog
     if should_create_dialog?(resp_sip_msg, req_sip_msg) do
-      Logger.info("Creating dialog for #{req_sip_msg.method} response #{resp_sip_msg.status_code}")
+      Logger.info(
+        "Creating dialog for #{req_sip_msg.method} response #{resp_sip_msg.status_code}"
+      )
+
       # Start a new dialog
       case Parrot.Sip.Dialog.Supervisor.start_child({:uas, resp_sip_msg, req_sip_msg}) do
         {:ok, pid} ->
@@ -558,7 +573,10 @@ defmodule Parrot.Sip.DialogStatem do
           resp_sip_msg
       end
     else
-      Logger.debug("Not creating dialog for #{req_sip_msg.method} response #{resp_sip_msg.status_code}")
+      Logger.debug(
+        "Not creating dialog for #{req_sip_msg.method} response #{resp_sip_msg.status_code}"
+      )
+
       resp_sip_msg
     end
   end
@@ -569,12 +587,19 @@ defmodule Parrot.Sip.DialogStatem do
     # Convert to atom if it's a string
     method_atom = if is_binary(method), do: String.to_atom(String.downcase(method)), else: method
     result = method_atom in [:invite, :subscribe]
-    Logger.debug("should_create_dialog? method=#{inspect(method)} (#{inspect(method_atom)}), status=#{status_code}, result=#{result}")
+
+    Logger.debug(
+      "should_create_dialog? method=#{inspect(method)} (#{inspect(method_atom)}), status=#{status_code}, result=#{result}"
+    )
+
     result
   end
 
   defp should_create_dialog?(resp, req) do
-    Logger.debug("should_create_dialog? not 2xx: resp status=#{inspect(resp.status_code)}, req method=#{inspect(req.method)}")
+    Logger.debug(
+      "should_create_dialog? not 2xx: resp status=#{inspect(resp.status_code)}, req method=#{inspect(req.method)}"
+    )
+
     false
   end
 

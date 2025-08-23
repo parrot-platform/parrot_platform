@@ -6,7 +6,7 @@ defmodule Parrot.Media.OpusPipeline do
 
   use Membrane.Pipeline
   require Logger
-  
+
   import Parrot.Media.PipelineHelpers
 
   @impl true
@@ -203,9 +203,7 @@ defmodule Parrot.Media.OpusPipeline do
         _ctx,
         state
       ) do
-    Logger.info(
-      "OpusPipeline #{state.session_id}: New incoming RTP stream with SSRC: #{ssrc}"
-    )
+    Logger.info("OpusPipeline #{state.session_id}: New incoming RTP stream with SSRC: #{ssrc}")
 
     Logger.debug("  Full notification: #{inspect(notification)}")
 

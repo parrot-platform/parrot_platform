@@ -1,7 +1,7 @@
 defmodule Parrot.Media.AudioChunker do
   @moduledoc """
   Universal audio chunker that normalizes audio buffers into fixed-size chunks with consistent timestamps.
-  
+
   This module handles both raw audio (PCM) and encoded audio (G.711, etc.) formats, solving the
   common problem of irregular buffer sizes from audio sources.
 
@@ -9,7 +9,7 @@ defmodule Parrot.Media.AudioChunker do
 
   Audio sources deliver buffers of varying sizes based on hardware timing, system load, and 
   buffer availability. However, many audio encoders and RTP packetizers require exact frame sizes:
-  
+
   - **OPUS at 48kHz**: Needs exactly 960 samples (20ms) per frame
   - **G.711 at 8kHz**: Needs exactly 160 samples (20ms) per RTP packet  
   - **OPUS at 48kHz with 10ms frames**: Needs exactly 480 samples
@@ -29,18 +29,18 @@ defmodule Parrot.Media.AudioChunker do
   The chunker can operate in two modes:
 
   ### 1. Sample-based chunking (for raw audio)
-  
+
   Specify `chunk_samples` to chunk by number of samples:
-  
+
       # For OPUS encoder at 48kHz with 20ms frames
       child(:audio_chunker, %Parrot.Media.AudioChunker{
         chunk_samples: 960  # 20ms * 48kHz = 960 samples
       })
 
   ### 2. Duration-based chunking (for encoded audio like G.711)
-  
+
   Specify `chunk_duration_ms` and `sample_rate` to chunk by time duration:
-  
+
       # For G.711 RTP packets with 20ms duration
       child(:audio_chunker, %Parrot.Media.AudioChunker{
         chunk_duration_ms: 20,
@@ -74,11 +74,11 @@ defmodule Parrot.Media.AudioChunker do
 
   alias Membrane.{Buffer, RawAudio, G711}
 
-  def_input_pad(:input, 
+  def_input_pad(:input,
     accepted_format: any_of(RawAudio, G711),
     flow_control: :auto
   )
-  
+
   def_output_pad(:output,
     accepted_format: any_of(RawAudio, G711),
     flow_control: :auto
@@ -107,17 +107,17 @@ defmodule Parrot.Media.AudioChunker do
     # Validate options
     cond do
       opts.chunk_samples != nil and opts.chunk_duration_ms != nil ->
-        raise ArgumentError, 
-          "Cannot specify both chunk_samples and chunk_duration_ms. Choose one based on your audio format."
-      
+        raise ArgumentError,
+              "Cannot specify both chunk_samples and chunk_duration_ms. Choose one based on your audio format."
+
       opts.chunk_samples == nil and opts.chunk_duration_ms == nil ->
         raise ArgumentError,
-          "Must specify either chunk_samples (for raw audio) or chunk_duration_ms (for encoded audio)"
-      
+              "Must specify either chunk_samples (for raw audio) or chunk_duration_ms (for encoded audio)"
+
       opts.chunk_duration_ms != nil and opts.sample_rate == nil ->
         raise ArgumentError,
-          "sample_rate is required when using chunk_duration_ms"
-      
+              "sample_rate is required when using chunk_duration_ms"
+
       true ->
         :ok
     end
@@ -128,7 +128,7 @@ defmodule Parrot.Media.AudioChunker do
        chunk_samples: opts.chunk_samples,
        chunk_duration_ms: opts.chunk_duration_ms,
        sample_rate: opts.sample_rate,
-       
+
        # Runtime state
        accumulator: <<>>,
        pts: 0,
@@ -141,27 +141,28 @@ defmodule Parrot.Media.AudioChunker do
   @impl true
   @doc """
   Handles incoming stream format and calculates chunking parameters.
-  
+
   For raw audio, calculates bytes based on sample format and channels.
   For encoded audio (G.711), uses 1 byte per sample.
   """
   def handle_stream_format(:input, stream_format, _ctx, state) do
-    {bytes_per_chunk, chunk_duration_ns} = 
+    {bytes_per_chunk, chunk_duration_ns} =
       calculate_chunk_parameters(stream_format, state)
-    
-    state = %{state | 
-      stream_format: stream_format,
-      bytes_per_chunk: bytes_per_chunk,
-      chunk_duration_ns: chunk_duration_ns
+
+    state = %{
+      state
+      | stream_format: stream_format,
+        bytes_per_chunk: bytes_per_chunk,
+        chunk_duration_ns: chunk_duration_ns
     }
-    
+
     {[stream_format: {:output, stream_format}], state}
   end
 
   @impl true
   @doc """
   Accumulates incoming audio data and outputs fixed-size chunks.
-  
+
   This is the heart of the chunker. It:
   1. Adds new data to our accumulator buffer
   2. Extracts as many complete chunks as possible
@@ -195,17 +196,18 @@ defmodule Parrot.Media.AudioChunker do
   @impl true
   def handle_end_of_stream(:input, _ctx, state) do
     # Send any remaining data as the last chunk, padded with silence if needed
-    actions = 
+    actions =
       if byte_size(state.accumulator) > 0 do
         # Pad with silence to make a complete chunk
         padding_size = state.bytes_per_chunk - byte_size(state.accumulator)
         padded_payload = state.accumulator <> :binary.copy(<<0>>, padding_size)
-        
+
         last_buffer = %Buffer{
           payload: padded_payload,
           pts: state.pts,
           dts: state.pts
         }
+
         [buffer: {:output, last_buffer}, end_of_stream: :output]
       else
         [end_of_stream: :output]
@@ -221,7 +223,7 @@ defmodule Parrot.Media.AudioChunker do
       bytes_per_sample = get_bytes_per_sample(format.sample_format)
       bytes_per_chunk = state.chunk_samples * format.channels * bytes_per_sample
       chunk_duration_ns = div(state.chunk_samples * 1_000_000_000, format.sample_rate)
-      
+
       {bytes_per_chunk, chunk_duration_ns}
     else
       # Duration-based chunking for raw audio
@@ -229,7 +231,7 @@ defmodule Parrot.Media.AudioChunker do
       bytes_per_sample = get_bytes_per_sample(format.sample_format)
       bytes_per_chunk = samples_per_chunk * format.channels * bytes_per_sample
       chunk_duration_ns = state.chunk_duration_ms * 1_000_000
-      
+
       {bytes_per_chunk, chunk_duration_ns}
     end
   end
@@ -239,15 +241,16 @@ defmodule Parrot.Media.AudioChunker do
     if state.chunk_duration_ms do
       # Use configured duration and sample rate
       samples_per_chunk = div(state.sample_rate * state.chunk_duration_ms, 1000)
-      bytes_per_chunk = samples_per_chunk  # 1 byte per sample for G.711
+      # 1 byte per sample for G.711
+      bytes_per_chunk = samples_per_chunk
       chunk_duration_ns = state.chunk_duration_ms * 1_000_000
-      
+
       {bytes_per_chunk, chunk_duration_ns}
     else
       # Fallback: use chunk_samples if provided (though unusual for G.711)
       bytes_per_chunk = state.chunk_samples
       chunk_duration_ns = div(state.chunk_samples * 1_000_000_000, state.sample_rate || 8000)
-      
+
       {bytes_per_chunk, chunk_duration_ns}
     end
   end
@@ -257,7 +260,7 @@ defmodule Parrot.Media.AudioChunker do
   defp chunk_data(data, chunk_size, pts, duration_ns, acc) when byte_size(data) >= chunk_size do
     # Extract exactly chunk_size bytes
     <<chunk::binary-size(chunk_size), rest::binary>> = data
-    
+
     # Recurse with remaining data, incrementing timestamp
     chunk_data(rest, chunk_size, pts + duration_ns, duration_ns, [{chunk, pts} | acc])
   end
@@ -275,5 +278,6 @@ defmodule Parrot.Media.AudioChunker do
   defp get_bytes_per_sample(:f32be), do: 4
   defp get_bytes_per_sample(:s8), do: 1
   defp get_bytes_per_sample(:u8), do: 1
-  defp get_bytes_per_sample(_), do: 2  # Default to 16-bit
+  # Default to 16-bit
+  defp get_bytes_per_sample(_), do: 2
 end

@@ -1,6 +1,6 @@
 defmodule Parrot.Sip.DialogTest do
   use ExUnit.Case, async: true
-  
+
   alias Parrot.Sip.Dialog
   alias Parrot.Sip.Message
   alias Parrot.Sip.Headers.{From, To, CSeq, Contact}
@@ -18,9 +18,9 @@ defmodule Parrot.Sip.DialogTest do
           "call-id" => "call-123@example.com"
         }
       }
-      
+
       dialog_id = Dialog.from_message(request)
-      
+
       assert dialog_id.call_id == "call-123@example.com"
       assert dialog_id.local_tag == "from-tag-123"
       assert dialog_id.remote_tag == "to-tag-456"
@@ -38,9 +38,9 @@ defmodule Parrot.Sip.DialogTest do
           "call-id" => "call-123@example.com"
         }
       }
-      
+
       dialog_id = Dialog.from_message(request)
-      
+
       assert dialog_id.call_id == "call-123@example.com"
       assert dialog_id.local_tag == "from-tag-123"
       assert dialog_id.remote_tag == "to-tag-456"
@@ -58,9 +58,9 @@ defmodule Parrot.Sip.DialogTest do
           "call-id" => "call-123@example.com"
         }
       }
-      
+
       dialog_id = Dialog.from_message(response)
-      
+
       # For responses, tags are swapped
       assert dialog_id.call_id == "call-123@example.com"
       assert dialog_id.local_tag == "to-tag-456"
@@ -79,9 +79,9 @@ defmodule Parrot.Sip.DialogTest do
           "call-id" => "call-123@example.com"
         }
       }
-      
+
       dialog_id = Dialog.from_message(request)
-      
+
       assert dialog_id.call_id == "call-123@example.com"
       assert dialog_id.local_tag == "from-tag-123"
       assert dialog_id.remote_tag == nil
@@ -96,7 +96,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-123",
         remote_tag: "tag-456"
       }
-      
+
       result = Dialog.to_string(dialog)
       assert result == "abc@example.com;local=tag-123;remote=tag-456"
     end
@@ -107,7 +107,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-123",
         remote_tag: nil
       }
-      
+
       result = Dialog.to_string(dialog)
       assert result == "abc@example.com;local=tag-123"
     end
@@ -119,7 +119,7 @@ defmodule Parrot.Sip.DialogTest do
         remote_tag: "tag-456",
         direction: :uac
       }
-      
+
       result = Dialog.to_string(dialog_id)
       assert result == "abc@example.com;local=tag-123;remote=tag-456;uac"
     end
@@ -130,7 +130,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-123",
         remote_tag: nil
       }
-      
+
       result = Dialog.to_string(dialog_id)
       assert result == "abc@example.com;local=tag-123"
     end
@@ -142,7 +142,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-123",
         remote_tag: "tag-456"
       }
-      
+
       assert Dialog.is_complete?(dialog)
     end
 
@@ -151,7 +151,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-123",
         remote_tag: nil
       }
-      
+
       refute Dialog.is_complete?(dialog)
     end
 
@@ -160,7 +160,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: nil,
         remote_tag: "tag-456"
       }
-      
+
       refute Dialog.is_complete?(dialog)
     end
 
@@ -169,7 +169,7 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-123",
         remote_tag: "tag-456"
       }
-      
+
       assert Dialog.is_complete?(dialog_id)
     end
   end
@@ -177,7 +177,7 @@ defmodule Parrot.Sip.DialogTest do
   describe "new/4" do
     test "creates dialog ID with all parameters" do
       dialog_id = Dialog.new("call-123", "local-456", "remote-789", :uas)
-      
+
       assert dialog_id.call_id == "call-123"
       assert dialog_id.local_tag == "local-456"
       assert dialog_id.remote_tag == "remote-789"
@@ -186,13 +186,13 @@ defmodule Parrot.Sip.DialogTest do
 
     test "creates dialog ID with default direction" do
       dialog_id = Dialog.new("call-123", "local-456", "remote-789")
-      
+
       assert dialog_id.direction == :uac
     end
 
     test "creates dialog ID without remote tag" do
       dialog_id = Dialog.new("call-123", "local-456")
-      
+
       assert dialog_id.remote_tag == nil
       assert dialog_id.direction == :uac
     end
@@ -206,9 +206,9 @@ defmodule Parrot.Sip.DialogTest do
         remote_tag: "remote-789",
         direction: :uac
       }
-      
+
       peer = Dialog.peer_dialog_id(dialog_id)
-      
+
       assert peer.call_id == "call-123"
       assert peer.local_tag == "remote-789"
       assert peer.remote_tag == "local-456"
@@ -222,9 +222,9 @@ defmodule Parrot.Sip.DialogTest do
         remote_tag: "remote-789",
         direction: :uas
       }
-      
+
       peer = Dialog.peer_dialog_id(dialog_id)
-      
+
       assert peer.call_id == "call-123"
       assert peer.local_tag == "remote-789"
       assert peer.remote_tag == "local-456"
@@ -239,13 +239,13 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-456",
         remote_tag: "tag-789"
       }
-      
+
       dialog_id2 = %{
         call_id: "call-123",
         local_tag: "tag-456",
         remote_tag: "tag-789"
       }
-      
+
       assert Dialog.match?(dialog_id1, dialog_id2)
     end
 
@@ -255,13 +255,13 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-456",
         remote_tag: "tag-789"
       }
-      
+
       dialog_id2 = %{
         call_id: "call-123",
         local_tag: "tag-789",
         remote_tag: "tag-456"
       }
-      
+
       assert Dialog.match?(dialog_id1, dialog_id2)
     end
 
@@ -271,13 +271,13 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-456",
         remote_tag: "tag-789"
       }
-      
+
       dialog_id2 = %{
         call_id: "call-999",
         local_tag: "tag-456",
         remote_tag: "tag-789"
       }
-      
+
       refute Dialog.match?(dialog_id1, dialog_id2)
     end
 
@@ -287,13 +287,13 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "tag-456",
         remote_tag: "tag-789"
       }
-      
+
       dialog_id2 = %{
         call_id: "call-123",
         local_tag: "tag-111",
         remote_tag: "tag-222"
       }
-      
+
       refute Dialog.match?(dialog_id1, dialog_id2)
     end
   end
@@ -305,9 +305,9 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "local-456",
         remote_tag: nil
       }
-      
+
       updated = Dialog.with_remote_tag(dialog_id, "remote-789")
-      
+
       assert updated.remote_tag == "remote-789"
       assert updated.call_id == "call-123"
       assert updated.local_tag == "local-456"
@@ -319,9 +319,9 @@ defmodule Parrot.Sip.DialogTest do
         local_tag: "local-456",
         remote_tag: "old-remote"
       }
-      
+
       updated = Dialog.with_remote_tag(dialog_id, "new-remote")
-      
+
       assert updated.remote_tag == "new-remote"
     end
   end
@@ -347,7 +347,7 @@ defmodule Parrot.Sip.DialogTest do
           }
         }
       }
-      
+
       response = %Message{
         type: :response,
         status_code: 200,
@@ -364,13 +364,13 @@ defmodule Parrot.Sip.DialogTest do
           "cseq" => %CSeq{number: 100, method: :invite}
         }
       }
-      
+
       {:ok, request: request, response: response}
     end
 
     test "creates dialog from UAS perspective", %{request: request, response: response} do
       {:ok, dialog} = Dialog.uas_create(request, response)
-      
+
       assert dialog.call_id == "call-123@example.com"
       assert dialog.local_tag == "to-tag-456"
       assert dialog.remote_tag == "from-tag-123"
@@ -399,9 +399,9 @@ defmodule Parrot.Sip.DialogTest do
           "cseq" => %CSeq{number: 100, method: :invite}
         }
       }
-      
+
       {:ok, dialog} = Dialog.uas_create(request, provisional)
-      
+
       assert dialog.state == :early
     end
   end
@@ -424,7 +424,7 @@ defmodule Parrot.Sip.DialogTest do
           "cseq" => %CSeq{number: 100, method: :invite}
         }
       }
-      
+
       response = %Message{
         type: :response,
         status_code: 200,
@@ -444,13 +444,13 @@ defmodule Parrot.Sip.DialogTest do
           }
         }
       }
-      
+
       {:ok, request: request, response: response}
     end
 
     test "creates dialog from UAC perspective", %{request: request, response: response} do
       {:ok, dialog} = Dialog.uac_create(request, response)
-      
+
       assert dialog.call_id == "call-123@example.com"
       assert dialog.local_tag == "from-tag-123"
       assert dialog.remote_tag == "to-tag-456"
@@ -466,7 +466,7 @@ defmodule Parrot.Sip.DialogTest do
   describe "generate_id/4" do
     test "generates consistent dialog ID" do
       id = Dialog.generate_id(:uac, "call-123", "local-456", "remote-789")
-      
+
       assert id == "call-123;local=local-456;remote=remote-789;uac"
     end
 
@@ -474,7 +474,7 @@ defmodule Parrot.Sip.DialogTest do
       # When the same dialog is viewed from different perspectives
       uac_id = Dialog.generate_id(:uac, "call-123", "alice-tag", "bob-tag")
       uas_id = Dialog.generate_id(:uas, "call-123", "bob-tag", "alice-tag")
-      
+
       # The IDs should be different but related
       assert uac_id == "call-123;local=alice-tag;remote=bob-tag;uac"
       assert uas_id == "call-123;local=bob-tag;remote=alice-tag;uas"

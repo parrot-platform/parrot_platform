@@ -82,9 +82,6 @@ defmodule Parrot.Sip.Dialog do
           secure: boolean()
         }
 
-
-
-
   @doc """
   Facade function that creates a request within an existing dialog.
 
@@ -186,7 +183,7 @@ defmodule Parrot.Sip.Dialog do
   @spec peer_dialog_id(map()) :: map()
   def peer_dialog_id(%{direction: direction} = dialog_id) do
     peer_direction = if direction == :uac, do: :uas, else: :uac
-    
+
     %{
       call_id: dialog_id.call_id,
       local_tag: dialog_id.remote_tag,
@@ -325,7 +322,7 @@ defmodule Parrot.Sip.Dialog do
 
   @doc """
   Converts a dialog ID to a string representation for Registry lookups.
-  
+
   This unifies the previous DialogId.to_string/1 and Dialog.generate_id/4 functions
   into a single consistent format.
 
@@ -347,10 +344,12 @@ defmodule Parrot.Sip.Dialog do
 
   def to_string(%{call_id: call_id, local_tag: local_tag, remote_tag: remote_tag} = dialog_id) do
     remote_part = if remote_tag, do: ";remote=#{remote_tag}", else: ""
-    direction_part = if Map.has_key?(dialog_id, :direction), do: ";#{dialog_id.direction}", else: ""
+
+    direction_part =
+      if Map.has_key?(dialog_id, :direction), do: ";#{dialog_id.direction}", else: ""
+
     "#{call_id};local=#{local_tag}#{remote_part}#{direction_part}"
   end
-
 
   @doc """
   Creates a dialog from the UAS perspective.

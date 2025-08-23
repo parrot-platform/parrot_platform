@@ -95,12 +95,13 @@ defmodule Parrot.MixProject do
       nil ->
         Mix.shell().error("""
         SIPp is not installed or not in PATH.
-        
+
         Please install SIPp:
           - macOS: brew install sipp
           - Ubuntu/Debian: apt-get install sipp
           - RHEL/CentOS: yum install sipp
         """)
+
         exit({:shutdown, 1})
 
       _path ->
@@ -113,7 +114,7 @@ defmodule Parrot.MixProject do
   defp run_all_tests(args) do
     Mix.shell().info("Running ALL tests (including SIPp and slow tests)...")
     Mix.shell().info("This may take a while...")
-    
+
     # Check if SIPp is installed for those tests
     unless System.find_executable("sipp") do
       Mix.shell().warning("""
@@ -121,7 +122,7 @@ defmodule Parrot.MixProject do
       Install with: brew install sipp (macOS) or apt-get install sipp (Linux)
       """)
     end
-    
+
     # Run all tests with excluded tags included
     Mix.Task.run("test", ["--include", "sipp", "--include", "slow" | args])
   end

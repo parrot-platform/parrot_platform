@@ -1,6 +1,6 @@
 defmodule Parrot.Media.SilenceSourceTest do
   use ExUnit.Case, async: false
-  
+
   @moduletag :slow
 
   import Membrane.ChildrenSpec
@@ -24,7 +24,6 @@ defmodule Parrot.Media.SilenceSourceTest do
             })
             |> child(:sink, Testing.Sink)
         )
-
 
       # Let it run for approximately 100ms
       assert_sink_buffer(pipeline, :sink, buffer, 150)
@@ -60,7 +59,6 @@ defmodule Parrot.Media.SilenceSourceTest do
             |> child(:sink, Testing.Sink)
         )
 
-
       # Should receive stream format first
       assert_sink_stream_format(pipeline, :sink, stream_format, 100)
 
@@ -82,7 +80,6 @@ defmodule Parrot.Media.SilenceSourceTest do
             child(:source, %SilenceSource{interval: 10})
             |> child(:sink, Testing.Sink)
         )
-
 
       # Verify it generates multiple buffers continuously
       assert_sink_buffer(pipeline, :sink, _buffer1, 100)
@@ -109,7 +106,6 @@ defmodule Parrot.Media.SilenceSourceTest do
             |> child(:sink, Testing.Sink)
         )
 
-
       assert_sink_buffer(pipeline, :sink, buffer, 100)
 
       # 48000 Hz, 10ms = 480 samples
@@ -133,7 +129,6 @@ defmodule Parrot.Media.SilenceSourceTest do
             })
             |> child(:sink, Testing.Sink)
         )
-
 
       # Collect several buffers
       assert_sink_buffer(pipeline, :sink, buffer1, 100)

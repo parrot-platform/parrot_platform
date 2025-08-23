@@ -1,8 +1,8 @@
 defmodule Parrot.SippTest do
   use ExUnit.Case
-  
+
   @moduletag :sipp
-  
+
   require Logger
 
   # Simple handler for SIPp integration tests

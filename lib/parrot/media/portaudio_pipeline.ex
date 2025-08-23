@@ -301,14 +301,16 @@ defmodule Parrot.Media.PortAudioPipeline do
       # Microphone input (PortAudio captures at 48kHz by default)
       child(:mic_source, %PortAudio.Source{
         device_id: device_id || :default,
-        portaudio_buffer_size: 960,  # Match OPUS frame size: 20ms * 48kHz = 960 samples
+        # Match OPUS frame size: 20ms * 48kHz = 960 samples
+        portaudio_buffer_size: 960,
         latency: :high
       }),
 
       # Add chunker to ensure consistent frame sizes BEFORE timestamp generation
       # This ensures each buffer has exactly 960 samples (20ms)
       child(:audio_chunker, %AudioChunker{
-        chunk_samples: 960  # samples per chunk for 20ms at 48kHz mono
+        # samples per chunk for 20ms at 48kHz mono
+        chunk_samples: 960
       }),
 
       # Add timestamp generator to create fresh, regular timestamps
@@ -350,7 +352,7 @@ defmodule Parrot.Media.PortAudioPipeline do
 
       # Parse WAV
       child(:wav_parser, Membrane.WAV.Parser),
-      
+
       # Add timestamps to buffers from WAV parser
       child(:timestamp_generator, Parrot.Media.TimestampGenerator),
 
@@ -392,7 +394,7 @@ defmodule Parrot.Media.PortAudioPipeline do
 
       # Parse WAV
       child(:wav_parser, Membrane.WAV.Parser),
-      
+
       # Add timestamps to buffers from WAV parser
       child(:timestamp_generator, Parrot.Media.TimestampGenerator),
 
@@ -532,7 +534,7 @@ defmodule Parrot.Media.PortAudioPipeline do
     # the UDP endpoint's output pad to something. Use a Fake sink that drops all data.
     [
       child(:fake_sink, %Membrane.Debug.Sink{}),
-      
+
       # Connect UDP output to fake sink to satisfy pad requirements
       get_child(:udp_endpoint)
       |> via_out(:output)
