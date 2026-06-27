@@ -445,6 +445,35 @@ defmodule Parrot.MediaHandler do
   @callback handle_media_request(request :: term(), state) ::
               media_action() | {media_action(), state} | {:error, reason :: term(), state}
 
+  @doc """
+  Handle a decoded inbound audio frame from the remote leg.
+
+  Called for each decoded PCM buffer received on the inbound RTP stream, when
+  the media pipeline is tapping audio. Implement it to stream the remote
+  party's audio to a transcriber, recorder, or VAD — defining this callback is
+  what opts a session into the tap (otherwise inbound audio is discarded, as
+  before).
+
+  Runs on the media-pipeline process, so keep it non-blocking: hand the frame
+  to another process for heavy work (e.g. Whisper) rather than transcribing
+  inline.
+
+  ## Parameters
+
+  - `session_id` - Session identifier
+  - `audio_frame` - `%{ssrc: term(), pcm: binary()}` decoded PCM (signed 16-bit)
+  - `state` - Current handler state
+
+  ## Returns
+
+  - `{:ok, state}` - Acknowledged
+  """
+  @callback handle_audio_frame(
+              session_id,
+              audio_frame :: %{ssrc: term(), pcm: binary()},
+              state
+            ) :: {:ok, state}
+
   # Optional callbacks - all except init
   @optional_callbacks [
     handle_session_start: 3,
@@ -457,6 +486,7 @@ defmodule Parrot.MediaHandler do
     handle_stream_stop: 3,
     handle_stream_error: 3,
     handle_play_complete: 2,
-    handle_media_request: 2
+    handle_media_request: 2,
+    handle_audio_frame: 3
   ]
 end

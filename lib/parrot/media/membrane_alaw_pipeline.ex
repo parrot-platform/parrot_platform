@@ -229,6 +229,16 @@ defmodule Parrot.Media.MembraneAlawPipeline do
 
     Logger.debug("  Full notification: #{inspect(notification)}")
 
+    # Drain the decoded inbound audio. When the session's media handler taps
+    # audio, forward each frame to it via AudioTapSink; otherwise keep the
+    # original discard-only Debug.Sink (no behaviour change).
+    audio_sink =
+      if tap_audio?(state) do
+        %Parrot.Media.AudioTapSink{target: self(), ssrc: ssrc}
+      else
+        %Membrane.Debug.Sink{}
+      end
+
     # Create a pipeline to handle incoming RTP audio
     receive_audio_spec = [
       get_child(:rtp)
@@ -236,7 +246,7 @@ defmodule Parrot.Media.MembraneAlawPipeline do
         options: [depayloader: Membrane.RTP.G711.Depayloader]
       )
       |> child({:g711_decoder, ssrc}, Membrane.G711.Decoder)
-      |> child({:audio_sink, ssrc}, %Membrane.Debug.Sink{})
+      |> child({:audio_sink, ssrc}, audio_sink)
     ]
 
     {[spec: receive_audio_spec], state}
@@ -246,6 +256,34 @@ defmodule Parrot.Media.MembraneAlawPipeline do
   def handle_child_notification(_notification, _child, _ctx, state) do
     {[], state}
   end
+
+  # AudioTapSink (its own element process) forwards each decoded inbound PCM
+  # buffer here; relay it to the session's media handler. Runs on the pipeline
+  # process, so the handler callback must stay non-blocking.
+  @impl true
+  def handle_info({:parrot_audio_frame, ssrc, pcm}, _ctx, state) do
+    if tap_audio?(state) do
+      frame = %{ssrc: ssrc, pcm: pcm}
+
+      case state.media_handler.handle_audio_frame(state.session_id, frame, state.handler_state) do
+        {:ok, handler_state} -> {[], %{state | handler_state: handler_state}}
+        _other -> {[], state}
+      end
+    else
+      {[], state}
+    end
+  end
+
+  @impl true
+  def handle_info(_msg, _ctx, state), do: {[], state}
+
+  # True when the session's media handler opts into inbound-audio taps by
+  # implementing handle_audio_frame/3.
+  defp tap_audio?(%{media_handler: handler}) when is_atom(handler) and not is_nil(handler) do
+    Code.ensure_loaded?(handler) and function_exported?(handler, :handle_audio_frame, 3)
+  end
+
+  defp tap_audio?(_state), do: false
 
   defp parse_ip(ip) when is_binary(ip) do
     case :inet.parse_address(String.to_charlist(ip)) do
